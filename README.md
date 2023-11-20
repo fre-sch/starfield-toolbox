@@ -35,7 +35,7 @@ BlenderJSON-Import.pas uses this data to update only records contained in the JS
 Because of this, it doesn't need any specific record to be selected to apply it.
 
 
-## blender-scripts/starfield_json.py
+## blender-scripts/starfield_json_io.py
 
 Companion to the xedit-scripts, this Blender Addon enables import/export of the
 JSON data. Much like the xedit BlenderJSON-Import.pas script, this addon is not
@@ -44,3 +44,17 @@ made to create new data, only import modify and save.
 In addition to the import/export functionality, it adds a gizmo to help visualize
 the ship part snaps, and an object property panel to show the json meta information
 contained in the JSON.
+
+
+### Installation
+
+Copy the *.pas files into your xedit/Edit Scripts directory or use symlinks.
+Or use symlinks:
+
+```shell
+> New-Item -ItemType SymbolicLink -Target "starfield-toolbox\xedit-scripts\BlenderJSON-Export.pas" -Path "xedit\Edit Scripts\BlenderJSON-Export.pas"
+> New-Item -ItemType SymbolicLink -Target "starfield-toolbox\xedit-scripts\BlenderJSON-Import.pas" -Path "xedit\Edit Scripts\BlenderJSON-Import.pas"
+> New-Item -ItemType SymbolicLink -Target "starfield-toolbox\xedit-scripts\Create new part.pas" -Path "xedit\Edit Scripts\Create new part.pas"
+```
+
+In Blender add starfield_json_io.py as addon.
