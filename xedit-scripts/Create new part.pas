@@ -89,7 +89,7 @@ var
   old_cell_subrecord: IInterface;
   new_cell_subrecord: IInterface;
 begin
-  AddMessage('-- CLONE GROUP')
+  AddMessage('-- CLONE GROUP');
   for i := 0 to Pred(ElementCount(old_cell_group)) do begin
     old_cell_subrecord := ElementByIndex(old_cell_group, i);
     AddMessage('    Subrecord: ' + ShortName(old_cell_subrecord) + ' ' + GetElementEditValues(old_cell_subrecord, 'NAME'));
@@ -97,8 +97,8 @@ begin
     new_cell_subrecord := Add(new_cell, Signature(old_cell_subrecord), True);
     CloneRecordElements(old_cell_subrecord, new_cell_subrecord);
     SetIsPersistent(new_cell_subrecord, GetIsPersistent(old_cell_subrecord));
-    if Signature(new_cell_record) = 'REFR' then
-      ProcessREFR(new_cell_record);
+    if Signature(new_cell_subrecord) = 'REFR' then
+      ProcessREFR(new_cell_subrecord);
   end;
 end;
 
@@ -117,14 +117,14 @@ begin
 end;
 
 
-function ProcessCELL(cell: IInterface): IInterface;
+function ProcessCELL(old_cell: IInterface): IInterface;
 var
   i: integer;
   refs: IInterface;
   cellChildGroup: IInterface;
   group_cell, new_cell: IInterface;
 begin
-  AddMessage('-- CELL: ' + Name(cell));
+  AddMessage('-- CELL: ' + Name(old_cell));
   if not HasGroup(ToFile, 'CELL') then
     Add(ToFile, 'CELL', True);
   group_cell := GroupBySignature(ToFile, 'CELL');
@@ -148,7 +148,7 @@ begin
   AddMessage('    copy as new record: ' + Name(Result));
   UpdateEditorID(Result);
   cell := LinksTo(ElementByPath(Result, 'CNAM'));
-  cell := ProcessCELL(cell, ToFile);
+  cell := ProcessCELL(cell);
   SetEditValue(ElementByPath(Result, 'CNAM'), Name(cell));
   // CompareExchangeFormID(Result, cellOldFormId, cellNewFormId);
 end;
