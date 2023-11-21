@@ -19,6 +19,19 @@ var
   ReplaceEDID: string;
 
 
+procedure CloneRecordElements(old_record, new_record: IInterface);
+var
+  i: integer;
+  element: IInterface;
+begin
+  for i := 1 to Pred(ElementCount(old_record)) do begin
+    element := ElementByIndex(old_record, i);
+    wbCopyElementToRecord(element, new_record, False, True);
+    AddMessage('i: ' + IntToStr(i) + ', Sig: ' + Signature(element) + ' Elements: ' + IntToStr(ElementCount(element)));
+  end;
+end;
+
+
 procedure UpdateEditorID(elem: IInterface);
 var
   oldEdid: string;
@@ -55,46 +68,72 @@ begin
 end;
 
 
-procedure ProcessCellRefs(refs: IInterface);
+procedure ProcessREFR(refr: IInterface);
 var
-  i: integer;
-  ref: IInterface;
   refNameElement: IInterface;
   refLinkedElement: IInterface;
   copyMSTT: IInterface;
 begin
-  for i := 0 to Pred(ElementCount(refs)) do begin
-    ref := ElementByIndex(refs, i);
-    AddMessage('-- REFR: ' + Name(ref));
-    AddMessage('    copy as new');
-
-    ref := wbCopyElementToFile(ref, ToFile, True, True);
-    if not Assigned(ref) then Exit;
-
-    refNameElement := ElementBySignature(ref, 'NAME');
+    refNameElement := ElementBySignature(refr, 'NAME');
     refLinkedElement := LinksTo(refNameElement);
     if Signature(refLinkedElement) = 'MSTT' then begin
       copyMSTT := ProcessMSTT(refLinkedElement);
       SetEditValue(refNameElement, Name(copyMSTT));
     end;
+end;
+
+
+procedure CloneCellGroup(old_cell_group, new_cell: IInterface);
+var
+  i: integer;
+  old_cell_subrecord: IInterface;
+  new_cell_subrecord: IInterface;
+begin
+  AddMessage('-- CLONE GROUP')
+  for i := 0 to Pred(ElementCount(old_cell_group)) do begin
+    old_cell_subrecord := ElementByIndex(old_cell_group, i);
+    AddMessage('    Subrecord: ' + ShortName(old_cell_subrecord) + ' ' + GetElementEditValues(old_cell_subrecord, 'NAME'));
+    AddMessage('    FullPath: ' + FullPath(old_cell_subrecord));
+    new_cell_subrecord := Add(new_cell, Signature(old_cell_subrecord), True);
+    CloneRecordElements(old_cell_subrecord, new_cell_subrecord);
+    SetIsPersistent(new_cell_subrecord, GetIsPersistent(old_cell_subrecord));
+    if Signature(new_cell_record) = 'REFR' then
+      ProcessREFR(new_cell_record);
   end;
 end;
 
 
-procedure ProcessCell(cell: IInterface);
+procedure CloneCellGroups(old_cell, new_cell: IInterface);
+var
+  old_cell_group: IInterface;
+begin
+  old_cell_group := FindChildGroup(ChildGroup(old_cell), CellPersistentChildren, old_cell);
+  AddMessage('    persistent children: ' + IntToStr(ElementCount(old_cell_group)));
+  CloneCellGroup(old_cell_group, new_cell);
+
+  old_cell_group := FindChildGroup(ChildGroup(old_cell), CellTemporaryChildren, old_cell);
+  AddMessage('    temporary children: ' + IntToStr(ElementCount(old_cell_group)));
+  CloneCellGroup(old_cell_group, new_cell);
+end;
+
+
+function ProcessCELL(cell: IInterface): IInterface;
 var
   i: integer;
   refs: IInterface;
   cellChildGroup: IInterface;
+  group_cell, new_cell: IInterface;
 begin
   AddMessage('-- CELL: ' + Name(cell));
-
-  cellChildGroup := ChildGroup(cell);
-  refs := FindChildGroup(cellChildGroup, CellTemporaryChildren, cell);
-  ProcessCellRefs(refs);
-
-  refs := FindChildGroup(cellChildGroup, CellPersistentChildren, cell);
-  ProcessCellRefs(refs);
+  if not HasGroup(ToFile, 'CELL') then
+    Add(ToFile, 'CELL', True);
+  group_cell := GroupBySignature(ToFile, 'CELL');
+  new_cell := Add(group_cell, 'CELL', True);
+  CloneRecordElements(old_cell, new_cell);
+  UpdateEditorID(new_cell);
+  AddMessage('    copy as new record: ' + Name(new_cell));
+  CloneCellGroups(old_cell, new_cell);
+  Result := new_cell;
 end;
 
 
@@ -109,20 +148,9 @@ begin
   AddMessage('    copy as new record: ' + Name(Result));
   UpdateEditorID(Result);
   cell := LinksTo(ElementByPath(Result, 'CNAM'));
-  ProcessCELL(cell);
-
-  // need to fetch this again for override of CELL created while copying the REFRs
-  cell := LinksTo(ElementByPath(Result, 'CNAM'));
-  cellOldFormId := GetLoadOrderFormID(cell);
-  cellNewFormId := FileFormIDtoLoadOrderFormID(ToFile, GetNewFormID(ToFile));
-  // Modifies formid, and even though at this point based on the previous code,
-  // it seems like it should be a LoadOrderFormID, xedit internal code runs this
-  // seemingly for side effects. Without this, the CELL override will not have
-  // become a copy, but instead be injected with it's master formid.
-  LoadOrderFormIDtoFileFormID(ToFile, cellNewFormId);
-  SetLoadOrderFormID(cell, cellNewFormId);
-  UpdateEditorID(cell);
-  CompareExchangeFormID(Result, cellOldFormId, cellNewFormId);
+  cell := ProcessCELL(cell, ToFile);
+  SetEditValue(ElementByPath(Result, 'CNAM'), Name(cell));
+  // CompareExchangeFormID(Result, cellOldFormId, cellNewFormId);
 end;
 
 
