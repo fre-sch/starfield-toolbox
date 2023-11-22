@@ -49,7 +49,7 @@ begin
   old_value := EditorID(element);
   new_value := StringReplace(
     old_value, global_search_edid, global_replace_edid,
-    [rfReplaceAll, rfIgnoreCase]);
+    [rfReplaceAll]);
   new_value := new_value + global_suffix_edid;
   if SameText(new_value, old_value) then
     new_value := old_value + '_COPY';
