@@ -8,15 +8,24 @@
 }
 unit createnewpart;
 
+
 Const
-  CellPersistentChildren = 8;
-  CellTemporaryChildren = 9;
-  StartSignatures = 'COBJ,FLST,GBFM,CELL,REFR';
+  CELL_PERSISTENT_CHILDREN = 8;
+  CELL_TEMPORARY_CHILDREN = 9;
+  START_SIGNATURES = 'COBJ,FLST,GBFM,CELL,REFR';
+  MSTT_STAT_COPY_SKIP_EDID = 'PrefabPackinPivotDummy,OutpostGroupPackinDummy';
+
 
 var
-  ToFile: IInterface;
-  SearchEDID: string;
-  ReplaceEDID: string;
+  global_target_file: IInterface;
+  global_search_edid: string;
+  global_replace_edid: string;
+  global_suffix_edid: string;
+  global_cobj_copy: boolean;
+  global_flst_copy: boolean;
+  global_stat_copy: boolean;
+  global_mstt_copy: boolean;
+  global_stmp_copy: boolean;
 
 
 procedure CloneRecordElements(old_record, new_record: IInterface);
@@ -27,58 +36,88 @@ begin
   for i := 1 to Pred(ElementCount(old_record)) do begin
     element := ElementByIndex(old_record, i);
     wbCopyElementToRecord(element, new_record, False, True);
-    AddMessage('i: ' + IntToStr(i) + ', Sig: ' + Signature(element) + ' Elements: ' + IntToStr(ElementCount(element)));
+    // AddMessage('    i: ' + IntToStr(i) + ', Sig: ' + Signature(element) + ' Elements: ' + IntToStr(ElementCount(element)));
   end;
 end;
 
 
-procedure UpdateEditorID(elem: IInterface);
+procedure UpdateEditorID(element: IInterface);
 var
-  oldEdid: string;
-  newEdid: string;
+  old_value: string;
+  new_value: string;
 begin
-  oldEdid := EditorID(elem);
-  newEdid := StringReplace(
-    oldEdid, SearchEDID, ReplaceEDID,
+  old_value := EditorID(element);
+  new_value := StringReplace(
+    old_value, global_search_edid, global_replace_edid,
     [rfReplaceAll, rfIgnoreCase]);
-  if SameText(newEdid, oldEdid) then
-    newEdid := oldEdid + '_COPY';
-  SetEditorID(elem, newEdid);
+  new_value := new_value + global_suffix_edid;
+  if SameText(new_value, old_value) then
+    new_value := old_value + '_COPY';
+  SetEditorID(element, new_value);
 end;
 
 
-function ProcessMSTT(mstt: IInterface): IInterface;
+function ProcessSTMP(stmp_source: IInterface; mstt_edid: string): IInterface;
 var
-    stmp: IInterface;
-    copySTMP: IInterface;
+  stmp_copy: IInterface;
 begin
-    AddMessage('-- MSTT: ' + Name(mstt));
-    Result := wbCopyElementToFile(mstt, ToFile, True, True);
-    UpdateEditorID(Result);
-    AddMessage('    copy as new: ' + Name(Result));
-    stmp := LinksTo(ElementBySignature(mstt, 'SNTP'));
-    AddMessage('-- STMP: ' + Name(stmp));
-    copySTMP := wbCopyElementToFile(stmp, ToFile, True, True);
-    // set it first, so it contains the orientation phrase which is then
-    // replaced in UpdateEditorID
-    SetEditorID(copySTMP, 'ShipSnap_' + EditorID(mstt));
-    UpdateEditorID(copySTMP);
-    AddMessage('    copy as new: ' + Name(copySTMP));
-    SetEditValue(ElementBySignature(Result, 'SNTP'), Name(copySTMP));
+  AddMessage('-- STMP: ' + Name(stmp_source));
+  stmp_copy := wbCopyElementToFile(stmp_source, global_target_file, True, True);
+  // set it first, so it contains the orientation phrase which is then
+  // replaced in UpdateEditorID
+  // TODO: this prefix is only useful for ship part data, should be variable
+  SetEditorID(stmp_copy, 'ShipSnap_' + mstt_edid);
+  UpdateEditorID(stmp_copy);
+  AddMessage('    copy as new: ' + Name(stmp_copy));
+  Result := stmp_copy;
+end;
+
+
+function ProcessMSTTorSTAT(mstt_source: IInterface): IInterface;
+var
+  mstt_copy: IInterface;
+  stmp_source: IInterface;
+  stmp_copy: IInterface;
+begin
+  AddMessage('-- MSTT: ' + Name(mstt_source));
+  mstt_copy := wbCopyElementToFile(mstt_source, global_target_file, True, True);
+  UpdateEditorID(mstt_copy);
+  AddMessage('    copy as new: ' + Name(mstt_copy));
+
+  stmp_source := LinksTo(ElementBySignature(mstt_source, 'SNTP'));
+
+  if (Assigned(stmp_source) and global_stmp_copy) then
+  begin
+    // using the edid of mstt_source here, otherwise it could turn out as _COPY_COPY
+    stmp_copy := ProcessSTMP(stmp_source, EditorID(mstt_source));
+    SetEditValue(ElementBySignature(mstt_copy, 'SNTP'), Name(stmp_copy));
+  end;
+
+  Result := mstt_copy;
 end;
 
 
 procedure ProcessREFR(refr: IInterface);
 var
-  refNameElement: IInterface;
-  refLinkedElement: IInterface;
-  copyMSTT: IInterface;
+  ref_name_element: IInterface;
+  record_source: IInterface;
+  record_copy: IInterface;
 begin
-    refNameElement := ElementBySignature(refr, 'NAME');
-    refLinkedElement := LinksTo(refNameElement);
-    if Signature(refLinkedElement) = 'MSTT' then begin
-      copyMSTT := ProcessMSTT(refLinkedElement);
-      SetEditValue(refNameElement, Name(copyMSTT));
+    ref_name_element := ElementBySignature(refr, 'NAME');
+    record_source := LinksTo(ref_name_element);
+    if Pos(EditorID(record_source), MSTT_STAT_COPY_SKIP_EDID) > 0 then
+      Exit;
+
+    if (Signature(record_source) = 'MSTT') and global_mstt_copy then
+    begin
+      record_copy := ProcessMSTTorSTAT(record_source);
+      SetEditValue(ref_name_element, Name(record_copy));
+    end
+
+    else if (Signature(record_source) = 'STAT') and global_stat_copy then
+    begin
+      record_copy := ProcessMSTTorSTAT(record_source);
+      SetEditValue(ref_name_element, Name(record_copy));
     end;
 end;
 
@@ -89,7 +128,7 @@ var
   old_cell_subrecord: IInterface;
   new_cell_subrecord: IInterface;
 begin
-  AddMessage('-- CLONE GROUP');
+  AddMessage('-- Clone Cell Group');
   for i := 0 to Pred(ElementCount(old_cell_group)) do begin
     old_cell_subrecord := ElementByIndex(old_cell_group, i);
     AddMessage('    Subrecord: ' + ShortName(old_cell_subrecord) + ' ' + GetElementEditValues(old_cell_subrecord, 'NAME'));
@@ -107,11 +146,11 @@ procedure CloneCellGroups(old_cell, new_cell: IInterface);
 var
   old_cell_group: IInterface;
 begin
-  old_cell_group := FindChildGroup(ChildGroup(old_cell), CellPersistentChildren, old_cell);
+  old_cell_group := FindChildGroup(ChildGroup(old_cell), CELL_PERSISTENT_CHILDREN, old_cell);
   AddMessage('    persistent children: ' + IntToStr(ElementCount(old_cell_group)));
   CloneCellGroup(old_cell_group, new_cell);
 
-  old_cell_group := FindChildGroup(ChildGroup(old_cell), CellTemporaryChildren, old_cell);
+  old_cell_group := FindChildGroup(ChildGroup(old_cell), CELL_TEMPORARY_CHILDREN, old_cell);
   AddMessage('    temporary children: ' + IntToStr(ElementCount(old_cell_group)));
   CloneCellGroup(old_cell_group, new_cell);
 end;
@@ -119,233 +158,337 @@ end;
 
 function ProcessCELL(old_cell: IInterface): IInterface;
 var
-  i: integer;
-  refs: IInterface;
-  cellChildGroup: IInterface;
   group_cell, new_cell: IInterface;
 begin
   AddMessage('-- CELL: ' + Name(old_cell));
-  if not HasGroup(ToFile, 'CELL') then
-    Add(ToFile, 'CELL', True);
-  group_cell := GroupBySignature(ToFile, 'CELL');
+  if not HasGroup(global_target_file, 'CELL') then
+    Add(global_target_file, 'CELL', True);
+  group_cell := GroupBySignature(global_target_file, 'CELL');
   new_cell := Add(group_cell, 'CELL', True);
   CloneRecordElements(old_cell, new_cell);
   UpdateEditorID(new_cell);
-  AddMessage('    copy as new record: ' + Name(new_cell));
+  AddMessage('    copy as new: ' + Name(new_cell));
   CloneCellGroups(old_cell, new_cell);
   Result := new_cell;
 end;
 
 
-function ProcessPKIN(pkin: IInterface): IInterface;
+function ProcessPKIN(pkin_source: IInterface): IInterface;
 var
+  pkin_copy: IInterface;
   cell: IInterface;
-  cellNewFormId: cardinal;
-  cellOldFormId: cardinal;
 begin
-  AddMessage('-- PKIN: ' + Name(pkin));
-  Result := wbCopyElementToFile(pkin, ToFile, True, True);
-  AddMessage('    copy as new record: ' + Name(Result));
-  UpdateEditorID(Result);
-  cell := LinksTo(ElementByPath(Result, 'CNAM'));
+  AddMessage('-- PKIN: ' + Name(pkin_source));
+  pkin_copy := wbCopyElementToFile(pkin_source, global_target_file, True, True);
+  AddMessage('    copy as new: ' + Name(pkin_copy));
+  UpdateEditorID(pkin_copy);
+  cell := LinksTo(ElementByPath(pkin_copy, 'CNAM'));
   cell := ProcessCELL(cell);
-  SetEditValue(ElementByPath(Result, 'CNAM'), Name(cell));
-  // CompareExchangeFormID(Result, cellOldFormId, cellNewFormId);
+  SetEditValue(ElementByPath(pkin_copy, 'CNAM'), Name(cell));
+  Result := pkin_copy;
 end;
 
 
 procedure ProcessGBFMComponentLinkedForms(item: IInterface);
 var
-  formLinks: IInterface;
-  formLinkItem: IInterface;
-  pkin: IInterface;
-  copyPkin: IInterface;
+  form_links: IInterface;
+  form_link_item: IInterface;
+  pkin_source: IInterface;
+  pkin_copy: IInterface;
   i: integer;
 begin
   if GetEditValue(ElementBySignature(item, 'BFCB')) <> 'BGSFormLinkData_Component' then Exit;
   AddMessage('-- GBFM Linked Forms: ' + Name(item));
-  formLinks := ElementByPath(item, 'ITMC\Linked Forms');
-  AddMessage('    Form Links Count: ' + IntToStr(ElementCount(formLinks)));
-  for i := 0 to Pred(ElementCount(formLinks)) do begin
-    formLinkItem := ElementByIndex(formLinks, i);
-    pkin := LinksTo(ElementBySignature(formLinkItem, 'FLFM'));
-    copyPkin := ProcessPKIN(pkin);
-    SetElementEditValues(formLinkItem, 'FLFM', Name(copyPkin));
+  form_links := ElementByPath(item, 'ITMC\Linked Forms');
+  AddMessage('    Form Links Count: ' + IntToStr(ElementCount(form_links)));
+  for i := 0 to Pred(ElementCount(form_links)) do begin
+    form_link_item := ElementByIndex(form_links, i);
+    pkin_source := LinksTo(ElementBySignature(form_link_item, 'FLFM'));
+    pkin_copy := ProcessPKIN(pkin_source);
+    SetElementEditValues(form_link_item, 'FLFM', Name(pkin_copy));
   end;
 end;
 
 
-function ProcessGBFM(gbfm: IInterface): IInterface;
+function ProcessGBFM(gbfm_source: IInterface): IInterface;
 var
+  gbfm_copy: IInterface;
   component: IInterface;
-  componentList: IInterface;
+  component_list: IInterface;
   i: integer;
 begin
-  AddMessage('-- GBFM: ' + Name(gbfm));
-  Result := wbCopyElementToFile(gbfm, ToFile, True, True);
-  UpdateEditorID(Result);
-  AddMessage('    copy as new: ' + Name(Result));
-  componentList := ElementByPath(Result, 'Components');
-  for i := 0 to Pred(ElementCount(componentList)) do begin
-    component := ElementByIndex(componentList, i);
+  AddMessage('-- GBFM: ' + Name(gbfm_source));
+  gbfm_copy := wbCopyElementToFile(gbfm_source, global_target_file, True, True);
+  UpdateEditorID(gbfm_copy);
+  AddMessage('    copy as new: ' + Name(gbfm_copy));
+  component_list := ElementByPath(gbfm_copy, 'Components');
+  for i := 0 to Pred(ElementCount(component_list)) do begin
+    component := ElementByIndex(component_list, i);
     ProcessGBFMComponentLinkedForms(component);
   end;
+  Result := gbfm_copy;
 end;
 
 
-// TODO: reenable and use once the FormID conflict is resolved
-function ProcessFLST(flst: IInterface): IInterface;
+function ProcessFLST(flst_source: IInterface): IInterface;
 var
-  formIdList: IInterface;
+  flst_override: IInterface;
+  form_id_list: IInterface;
   entity: IInterface;
-  listElement: IInterface;
+  list_element: IInterface;
   i: integer;
 begin
-  AddMessage('-- FLST:' + Name(flst));
-  AddMessage('    copy as override');
-  flst := wbCopyElementToFile(flst, ToFile, False, True);
-  formIdList := ElementByPath(flst, 'FormIDs');
-  for i := 0 to Pred(ElementCount(formIdList)) do begin
-    listElement := ElementByIndex(formIdList, i);
-    entity := LinksTo(listElement);
-    SetEditValue(listElement, Name(ProcessGBFM(entity)));
+  AddMessage('-- FLST:' + Name(flst_source));
+  flst_override := wbCopyElementToFile(flst_source, global_target_file, global_flst_copy, True);
+  AddMessage('    copy as override: ' + Name(flst_override));
+  form_id_list := ElementByPath(flst_override, 'FormIDs');
+  for i := 0 to Pred(ElementCount(form_id_list)) do begin
+    list_element := ElementByIndex(form_id_list, i);
+    entity := LinksTo(list_element);
+    SetEditValue(list_element, Name(ProcessGBFM(entity)));
   end;
-  Result := flst;
+  Result := flst_override;
 end;
 
 
-// TODO: reenable and use once the FormID conflict is resolved
-procedure ProcessCOBJ(cobj: IInterface);
+procedure ProcessCOBJ(cobj_source: IInterface);
 var
-  cnam: IInterface;
-  cnamCopy: IInterface;
+  cobj_override: IInterface;
+  cnam_source: IInterface;
+  cnam_copy: IInterface;
 begin
-  AddMessage('-- COBJ:' + Name(cobj));
-  AddMessage('    copy as override');
-  wbCopyElementToFile(cobj, ToFile, False, True);
-  cnam := LinksTo(ElementBySignature(cobj, 'CNAM'));
-  if Assigned(cnam) then begin
-    if Signature(cnam) = 'GBFM' then begin
-        cnamCopy := ProcessGBFM(cnam);
-        SetElementEditValues(cnamCopy, 'CNAM', Name(cnamCopy));
+  AddMessage('-- COBJ:' + Name(cobj_source));
+  cobj_override := wbCopyElementToFile(cobj_source, global_target_file, global_cobj_copy, True);
+  AddMessage('    copy as override: ' + Name(cobj_override));
+  cnam_source := LinksTo(ElementBySignature(cobj_source, 'CNAM'));
+  if Assigned(cnam_source) then begin
+    if Signature(cnam_source) = 'GBFM' then begin
+        cnam_copy := ProcessGBFM(cnam_source);
+        SetElementEditValues(cobj_override, 'CNAM', Name(cnam_copy));
       end
     else begin
-        cnamCopy := ProcessFLST(cnam);
-        SetElementEditValues(cnamCopy, 'CNAM', Name(cnamCopy));
+        cnam_copy := ProcessFLST(cnam_source);
+        SetElementEditValues(cobj_override, 'CNAM', Name(cnam_copy));
     end;
   end;
 end;
 
 
-function FileDialog(e: IInterface): integer;
+function FileDialog(e: IInterface; var target_file: IInterface): integer;
 var
   i: integer;
   frm: TForm;
   clb: TCheckListBox;
 begin
   Result := 0;
-  if not Assigned(ToFile) then begin
-    frm := frmFileSelect;
-    try
-      frm.Caption := 'Select a plugin';
-      clb := TCheckListBox(frm.FindComponent('CheckListBox1'));
-      clb.Items.Add('<new file>');
-      for i := Pred(FileCount) downto 0 do
-        if GetFileName(e) <> GetFileName(FileByIndex(i)) then
-          clb.Items.InsertObject(1, GetFileName(FileByIndex(i)), FileByIndex(i))
-        else
-          Break;
-      if frm.ShowModal <> mrOk then begin
-        Result := 1;
-        Exit;
-      end;
-      for i := 0 to Pred(clb.Items.Count) do
-        if clb.Checked[i] then begin
-          if i = 0 then ToFile := AddNewFile else
-            ToFile := ObjectToElement(clb.Items.Objects[i]);
-          Break;
-        end;
-    finally
-      frm.Free;
-    end;
-    if not Assigned(ToFile) then begin
+
+  frm := frmFileSelect;
+  try
+    frm.Caption := 'Select a plugin';
+    clb := TCheckListBox(frm.FindComponent('CheckListBox1'));
+    clb.Items.Add('<new file>');
+
+    for i := Pred(FileCount) downto 0 do
+      if GetFileName(e) <> GetFileName(FileByIndex(i)) then
+        clb.Items.InsertObject(1, GetFileName(FileByIndex(i)), FileByIndex(i))
+      else
+        Break;
+
+    if frm.ShowModal <> mrOk then begin
       Result := 1;
       Exit;
     end;
+
+    for i := 0 to Pred(clb.Items.Count) do
+      if clb.Checked[i] then begin
+        if i = 0 then
+          target_file := AddNewFile
+        else
+          target_file := ObjectToElement(clb.Items.Objects[i]);
+        Break;
+      end;
+
+  finally
+    frm.Free;
   end;
-  AddRequiredElementMasters(e, ToFile, False);
+
+  if not Assigned(target_file) then begin
+    Result := 1;
+    Exit;
+  end;
+
+  AddRequiredElementMasters(e, target_file, False);
 end;
 
 
-function SearchReplaceDialog(strCaption: string; var strSearch, strReplace: string): integer;
+function OptionsDialog(strCaption: string): integer;
 var
   frm: TForm;
-  inputSearch: TLabeledEdit;
-  inputReplace: TLabeledEdit;
-  btnOK: TButton;
-  btnCancel: TButton;
-  pn: TPanel;
+  options_panel: TPanel;
+  update_edit_panel: TPanel;
+  input_search: TLabeledEdit;
+  input_replace: TLabeledEdit;
+  input_suffix: TLabeledEdit;
+  button_ok: TButton;
+  button_cancel: TButton;
+  button_panel: TPanel;
+  cobj_copy: TCheckBox;
+  flst_copy: TCheckBox;
+  stat_copy: TCheckBox;
+  mstt_copy: TCheckBox;
+  stmp_copy: TCheckBox;
 begin
   try
     frm := TForm.Create(nil);
     frm.Caption := strCaption;
     frm.AutoSize := true;
 
-    inputSearch := TLabeledEdit.Create(frm);
-    inputSearch.Parent := frm;
-    inputSearch.EditLabel.Caption := 'Search for';
-    inputSearch.LabelPosition := lpLeft;
-    inputSearch.Margins.Top := 4;
-    inputSearch.Margins.Bottom := 4;
-    inputSearch.Margins.Left := 120;
-    inputSearch.Margins.Right := 8;
-    inputSearch.AlignWithMargins := true;
-    inputSearch.Align := alTop;
+    options_panel := TPanel.Create(frm);
+    options_panel.Parent := frm;
+    options_panel.Caption := 'Options';
+    options_panel.ShowCaption := true;
+    options_panel.VerticalAlignment := 0;
+    options_panel.Alignment := 0;
+    options_panel.BevelOuter := 0;
+    options_panel.AutoSize := true;
+    options_panel.Margins.Top := 4;
+    options_panel.Margins.Bottom := 4;
+    options_panel.Margins.Left := 8;
+    options_panel.Margins.Right := 8;
+    options_panel.AlignWithMargins := true;
+    options_panel.Align := alTop;
 
-    inputReplace := TLabeledEdit.Create(frm);
-    inputReplace.Parent := frm;
-    inputReplace.EditLabel.Caption := 'Replace with';
-    inputReplace.LabelPosition := lpLeft;
-    inputReplace.Margins.Top := 4;
-    inputReplace.Margins.Bottom := 4;
-    inputReplace.Margins.Left := 120;
-    inputReplace.Margins.Right := 8;
-    inputReplace.AlignWithMargins := true;
-    inputReplace.Align := alTop;
+    cobj_copy := TCheckBox.Create(frm);
+    cobj_copy.Parent := options_panel;
+    cobj_copy.Caption := 'COBJ as override (unchecked) or as copy (checked)';
+    cobj_copy.Margins.Top := 20;
+    cobj_copy.Margins.Left := 8;
+    cobj_copy.Margins.Right := 8;
+    cobj_copy.AlignWithMargins := true;
+    cobj_copy.Align := alTop;
 
-    pn := TPanel.Create(frm);
-    pn.Parent := frm;
-    pn.Margins.Top := 4;
-    pn.Margins.Bottom := 4;
-    pn.Margins.Left := 0;
-    pn.Margins.Right := 0;
-    pn.AlignWithMargins := true;
-    pn.AutoSize := true;
-    pn.Align := alTop;
-    pn.BevelWidth := 0;
+    flst_copy := TCheckBox.Create(frm);
+    flst_copy.Parent := options_panel;
+    flst_copy.Caption := 'FLST as override (unchecked) or as copy (checked)';
+    flst_copy.Margins.Left := 8;
+    flst_copy.Margins.Right := 8;
+    flst_copy.AlignWithMargins := true;
+    flst_copy.Align := alTop;
 
-    btnOK := TButton.Create(frm);
-    btnOK.Parent := pn;
-    btnOK.Caption := 'OK';
-    btnOK.Margins.Left := 4;
-    btnOK.Margins.Right := 4;
-    btnOK.AlignWithMargins := true;
-    btnOK.Align := alRight;
-    btnOK.ModalResult := mrOk;
+    stat_copy := TCheckBox.Create(frm);
+    stat_copy.Parent := options_panel;
+    stat_copy.Caption := 'Copy STATs linked by REFR';
+    stat_copy.Margins.Left := 8;
+    stat_copy.Margins.Right := 8;
+    stat_copy.AlignWithMargins := true;
+    stat_copy.Checked := True;
+    stat_copy.Align := alTop;
 
-    btnCancel := TButton.Create(frm);
-    btnCancel.Parent := pn;
-    btnCancel.Caption := 'Cancel';
-    btnCancel.Margins.Left := 4;
-    btnCancel.Margins.Right := 8;
-    btnCancel.AlignWithMargins := true;
-    btnCancel.Align := alRight;
-    btnCancel.ModalResult := mrCancel;
+    mstt_copy := TCheckBox.Create(frm);
+    mstt_copy.Parent := options_panel;
+    mstt_copy.Caption := 'Copy MSTTs linked by REFR';
+    mstt_copy.Margins.Left := 8;
+    mstt_copy.Margins.Right := 8;
+    mstt_copy.AlignWithMargins := true;
+    mstt_copy.Checked := True;
+    mstt_copy.Align := alTop;
+
+    stmp_copy := TCheckBox.Create(frm);
+    stmp_copy.Parent := options_panel;
+    stmp_copy.Caption := 'Copy STMPs linked by MSTT or STAT';
+    stmp_copy.Margins.Left := 8;
+    stmp_copy.Margins.Right := 8;
+    stmp_copy.AlignWithMargins := true;
+    stmp_copy.Checked := True;
+    stmp_copy.Align := alTop;
+
+    update_edit_panel := TPanel.Create(frm);
+    update_edit_panel.Parent := frm;
+    update_edit_panel.Caption := 'Update EDID of copies';
+    update_edit_panel.ShowCaption := true;
+    update_edit_panel.VerticalAlignment := 0;
+    update_edit_panel.Alignment := 0;
+    update_edit_panel.BevelOuter := 0;
+    update_edit_panel.AutoSize := true;
+    update_edit_panel.Margins.Top := 4;
+    update_edit_panel.Margins.Bottom := 4;
+    update_edit_panel.Margins.Left := 8;
+    update_edit_panel.Margins.Right := 8;
+    update_edit_panel.AlignWithMargins := true;
+    update_edit_panel.Align := alTop;
+
+    input_search := TLabeledEdit.Create(frm);
+    input_search.Parent := update_edit_panel;
+    input_search.EditLabel.Caption := 'Search for';
+    input_search.LabelPosition := lpLeft;
+    input_search.Margins.Top := 20;
+    input_search.Margins.Bottom := 2;
+    input_search.Margins.Left := 120;
+    input_search.Margins.Right := 8;
+    input_search.AlignWithMargins := true;
+    input_search.Align := alTop;
+
+    input_replace := TLabeledEdit.Create(frm);
+    input_replace.Parent := update_edit_panel;
+    input_replace.EditLabel.Caption := 'Replace with';
+    input_replace.LabelPosition := lpLeft;
+    input_replace.Margins.Top := 2;
+    input_replace.Margins.Bottom := 2;
+    input_replace.Margins.Left := 120;
+    input_replace.Margins.Right := 8;
+    input_replace.AlignWithMargins := true;
+    input_replace.Align := alTop;
+
+    input_suffix := TLabeledEdit.Create(frm);
+    input_suffix.Parent := update_edit_panel;
+    input_suffix.EditLabel.Caption := 'Add Suffix';
+    input_suffix.LabelPosition := lpLeft;
+    input_suffix.Margins.Top := 2;
+    input_suffix.Margins.Bottom := 2;
+    input_suffix.Margins.Left := 120;
+    input_suffix.Margins.Right := 8;
+    input_suffix.AlignWithMargins := true;
+    input_suffix.Align := alTop;
+
+    button_panel := TPanel.Create(frm);
+    button_panel.Parent := frm;
+    button_panel.Margins.Top := 4;
+    button_panel.Margins.Bottom := 4;
+    button_panel.Margins.Left := 0;
+    button_panel.Margins.Right := 0;
+    button_panel.AlignWithMargins := true;
+    button_panel.AutoSize := true;
+    button_panel.Align := alTop;
+    button_panel.BevelWidth := 0;
+
+    button_ok := TButton.Create(frm);
+    button_ok.Parent := button_panel;
+    button_ok.Caption := 'OK';
+    button_ok.Margins.Left := 4;
+    button_ok.Margins.Right := 4;
+    button_ok.AlignWithMargins := true;
+    button_ok.Align := alRight;
+    button_ok.ModalResult := mrOk;
+
+    button_cancel := TButton.Create(frm);
+    button_cancel.Parent := button_panel;
+    button_cancel.Caption := 'Cancel';
+    button_cancel.Margins.Left := 4;
+    button_cancel.Margins.Right := 8;
+    button_cancel.AlignWithMargins := true;
+    button_cancel.Align := alRight;
+    button_cancel.ModalResult := mrCancel;
 
     Result := frm.ShowModal;
 
-    strSearch := inputSearch.Text;
-    strReplace := inputReplace.Text;
+    global_search_edid := input_search.Text;
+    global_replace_edid := input_replace.Text;
+    global_suffix_edid := input_suffix.Text;
+    global_cobj_copy := cobj_copy.Checked;
+    global_flst_copy := flst_copy.Checked;
+    global_stat_copy := stat_copy.Checked;
+    global_mstt_copy := mstt_copy.Checked;
+    global_stmp_copy := stmp_copy.Checked;
   finally
     frm.Free;
   end;
@@ -356,32 +499,37 @@ end;
 function Initialize: integer;
 begin
   Result := 0;
+  global_cobj_copy := False;
+  global_flst_copy := False;
+  global_mstt_copy := True;
+  global_stat_copy := True;
+  global_stmp_copy := True;
 end;
 
 
 function Process(element: IInterface): integer;
 begin
   Result := 0;
-  if Pos(Signature(element), StartSignatures) = 0 then begin
-    AddMessage('Got ' + Signature(element) + ', only works with: ' + StartSignatures);
+  if Pos(Signature(element), START_SIGNATURES) = 0 then begin
+    AddMessage('Got ' + Signature(element) + ', only works with: ' + START_SIGNATURES);
     Result := 1;
     Exit;
   end;
 
-  Result := FileDialog(element);
+  Result := FileDialog(element, global_target_file);
   if Result <> 0 then Exit;
 
-  Result := SearchReplaceDialog('Change EDID', SearchEDID, ReplaceEDID);
+  Result := OptionsDialog('Script Options');
   if Result <> mrOk then Exit;
 
   if Signature(element) = 'COBJ' then
     ProcessCOBJ(element)
+  else if Signature(element) = 'FLST' then
+    ProcessFLST(element)
   else if Signature(element) = 'GBFM' then
     ProcessGBFM(element)
   else if Signature(element) = 'REFR' then
     ProcessCELL(element)
-  else if Signature(element) = 'FLST' then
-    ProcessFLST(element)
   ;
   Result := 0;
 end;
