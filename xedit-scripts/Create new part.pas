@@ -14,6 +14,7 @@ Const
   CELL_TEMPORARY_CHILDREN = 9;
   START_SIGNATURES = 'COBJ,FLST,GBFM,CELL,REFR';
   MSTT_STAT_COPY_SKIP_EDID = 'PrefabPackinPivotDummy,OutpostGroupPackinDummy';
+  EXCLUDE_FILES_MASTERS = 'Starfield.esm,Starfield.exe,BlueprintShips-Starfield.esm,OldMars.esm,Constellation.esm';
 
 
 var
@@ -232,53 +233,69 @@ end;
 
 function ProcessFLST(flst_source: IInterface): IInterface;
 var
-  flst_override: IInterface;
+  flst_new: IInterface;
   form_id_list: IInterface;
   entity: IInterface;
   list_element: IInterface;
   i: integer;
 begin
   AddMessage('-- FLST:' + Name(flst_source));
-  flst_override := wbCopyElementToFile(flst_source, global_target_file, global_flst_copy, True);
-  AddMessage('    copy as override: ' + Name(flst_override));
-  form_id_list := ElementByPath(flst_override, 'FormIDs');
+  flst_new := wbCopyElementToFile(flst_source, global_target_file, global_flst_copy, True);
+  if global_flst_copy then
+  begin
+    AddMessage('    copy as new: ' + Name(flst_new));
+    UpdateEditorID(flst_new);
+  end
+  else
+    AddMessage('    copy as override: ' + Name(flst_new));
+
+  form_id_list := ElementByPath(flst_new, 'FormIDs');
   for i := 0 to Pred(ElementCount(form_id_list)) do begin
     list_element := ElementByIndex(form_id_list, i);
     entity := LinksTo(list_element);
     SetEditValue(list_element, Name(ProcessGBFM(entity)));
   end;
-  Result := flst_override;
+  Result := flst_new;
 end;
 
 
 procedure ProcessCOBJ(cobj_source: IInterface);
 var
-  cobj_override: IInterface;
+  cobj_new: IInterface;
   cnam_source: IInterface;
   cnam_copy: IInterface;
 begin
   AddMessage('-- COBJ:' + Name(cobj_source));
-  cobj_override := wbCopyElementToFile(cobj_source, global_target_file, global_cobj_copy, True);
-  AddMessage('    copy as override: ' + Name(cobj_override));
+  cobj_new := wbCopyElementToFile(cobj_source, global_target_file, global_cobj_copy, True);
+  if global_cobj_copy then
+  begin
+    AddMessage('    copy as new: ' + Name(cobj_new));
+    UpdateEditorID(cobj_new);
+  end
+  else
+    AddMessage('    copy as override: ' + Name(cobj_new));
+
   cnam_source := LinksTo(ElementBySignature(cobj_source, 'CNAM'));
   if Assigned(cnam_source) then begin
     if Signature(cnam_source) = 'GBFM' then begin
         cnam_copy := ProcessGBFM(cnam_source);
-        SetElementEditValues(cobj_override, 'CNAM', Name(cnam_copy));
+        SetElementEditValues(cobj_new, 'CNAM', Name(cnam_copy));
       end
     else begin
         cnam_copy := ProcessFLST(cnam_source);
-        SetElementEditValues(cobj_override, 'CNAM', Name(cnam_copy));
+        SetElementEditValues(cobj_new, 'CNAM', Name(cnam_copy));
     end;
   end;
 end;
 
 
-function FileDialog(e: IInterface; var target_file: IInterface): integer;
+function FileDialog(element: IInterface; var target_file: IInterface): integer;
 var
   i: integer;
   frm: TForm;
   clb: TCheckListBox;
+  current_file: IInterface;
+  current_file_name: string;
 begin
   Result := 0;
 
@@ -286,13 +303,14 @@ begin
   try
     frm.Caption := 'Select a plugin';
     clb := TCheckListBox(frm.FindComponent('CheckListBox1'));
-    clb.Items.Add('<new file>');
 
     for i := Pred(FileCount) downto 0 do
-      if GetFileName(e) <> GetFileName(FileByIndex(i)) then
-        clb.Items.InsertObject(1, GetFileName(FileByIndex(i)), FileByIndex(i))
-      else
-        Break;
+    begin
+      current_file := FileByIndex(i);
+      current_file_name := GetFileName(current_file);
+      if Pos(current_file_name, EXCLUDE_FILES_MASTERS) = 0 then
+        clb.Items.InsertObject(0, current_file_name, current_file);
+    end;
 
     if frm.ShowModal <> mrOk then begin
       Result := 1;
@@ -301,10 +319,7 @@ begin
 
     for i := 0 to Pred(clb.Items.Count) do
       if clb.Checked[i] then begin
-        if i = 0 then
-          target_file := AddNewFile
-        else
-          target_file := ObjectToElement(clb.Items.Objects[i]);
+        target_file := ObjectToElement(clb.Items.Objects[i]);
         Break;
       end;
 
@@ -317,7 +332,42 @@ begin
     Exit;
   end;
 
-  AddRequiredElementMasters(e, target_file, False);
+  if GetFileName(element) = GetFileName(target_file) then
+  begin
+    global_cobj_copy := true;
+    global_flst_copy := true;
+  end;
+
+  AddRequiredElementMasters(element, target_file, False);
+end;
+
+
+procedure SetMarginsLayout(
+    control: TControl;
+    margin_top, margin_bottom, margin_left, margin_right: integer;
+    align: integer);
+begin
+    control.Margins.Top := margin_top;
+    control.Margins.Bottom := margin_bottom;
+    control.Margins.Left := margin_left;
+    control.Margins.Right := margin_right;
+    control.AlignWithMargins := true;
+    control.Align := align;
+end;
+
+
+procedure DoPanelLayout(panel: TPanel; caption: string);
+begin
+  if Length(caption) > 0 then
+  begin
+    panel.Caption := caption;
+    panel.ShowCaption := true;
+    panel.VerticalAlignment := 0;
+    panel.Alignment := 0;
+  end;
+  panel.BevelOuter := 0;
+  panel.AutoSize := true;
+  SetMarginsLayout(panel, 4, 8, 8, 8, alTop);
 end;
 
 
@@ -345,141 +395,84 @@ begin
 
     options_panel := TPanel.Create(frm);
     options_panel.Parent := frm;
-    options_panel.Caption := 'Options';
-    options_panel.ShowCaption := true;
-    options_panel.VerticalAlignment := 0;
-    options_panel.Alignment := 0;
-    options_panel.BevelOuter := 0;
-    options_panel.AutoSize := true;
-    options_panel.Margins.Top := 4;
-    options_panel.Margins.Bottom := 4;
-    options_panel.Margins.Left := 8;
-    options_panel.Margins.Right := 8;
-    options_panel.AlignWithMargins := true;
-    options_panel.Align := alTop;
+    DoPanelLayout(options_panel, 'Options');
 
     cobj_copy := TCheckBox.Create(frm);
     cobj_copy.Parent := options_panel;
     cobj_copy.Caption := 'COBJ as override (unchecked) or as copy (checked)';
-    cobj_copy.Margins.Top := 20;
-    cobj_copy.Margins.Left := 8;
-    cobj_copy.Margins.Right := 8;
-    cobj_copy.AlignWithMargins := true;
-    cobj_copy.Align := alTop;
+    // disable this if the global var has been set to true (via the same file check in FileDialog)
+    cobj_copy.Enabled := not global_cobj_copy;
+    cobj_copy.Checked := global_cobj_copy;
+    SetMarginsLayout(cobj_copy, 20, 0, 16, 0, alTop);
 
     flst_copy := TCheckBox.Create(frm);
     flst_copy.Parent := options_panel;
     flst_copy.Caption := 'FLST as override (unchecked) or as copy (checked)';
-    flst_copy.Margins.Left := 8;
-    flst_copy.Margins.Right := 8;
-    flst_copy.AlignWithMargins := true;
-    flst_copy.Align := alTop;
+    // disable this if the global var has been set to true (via the same file check in FileDialog)
+    flst_copy.Enabled := not global_flst_copy;
+    flst_copy.Checked := global_flst_copy;
+    SetMarginsLayout(flst_copy, 0, 0, 16, 0, alTop);
 
     stat_copy := TCheckBox.Create(frm);
     stat_copy.Parent := options_panel;
     stat_copy.Caption := 'Copy STATs linked by REFR';
-    stat_copy.Margins.Left := 8;
-    stat_copy.Margins.Right := 8;
-    stat_copy.AlignWithMargins := true;
     stat_copy.Checked := True;
-    stat_copy.Align := alTop;
+    SetMarginsLayout(stat_copy, 0, 0, 16, 0, alTop);
 
     mstt_copy := TCheckBox.Create(frm);
     mstt_copy.Parent := options_panel;
     mstt_copy.Caption := 'Copy MSTTs linked by REFR';
-    mstt_copy.Margins.Left := 8;
-    mstt_copy.Margins.Right := 8;
-    mstt_copy.AlignWithMargins := true;
     mstt_copy.Checked := True;
-    mstt_copy.Align := alTop;
+    SetMarginsLayout(mstt_copy, 0, 0, 16, 0, alTop);
 
     stmp_copy := TCheckBox.Create(frm);
     stmp_copy.Parent := options_panel;
     stmp_copy.Caption := 'Copy STMPs linked by MSTT or STAT';
-    stmp_copy.Margins.Left := 8;
-    stmp_copy.Margins.Right := 8;
-    stmp_copy.AlignWithMargins := true;
     stmp_copy.Checked := True;
-    stmp_copy.Align := alTop;
+    SetMarginsLayout(stmp_copy, 0, 0, 16, 0, alTop);
 
     update_edit_panel := TPanel.Create(frm);
     update_edit_panel.Parent := frm;
-    update_edit_panel.Caption := 'Update EDID of copies';
-    update_edit_panel.ShowCaption := true;
-    update_edit_panel.VerticalAlignment := 0;
-    update_edit_panel.Alignment := 0;
-    update_edit_panel.BevelOuter := 0;
-    update_edit_panel.AutoSize := true;
-    update_edit_panel.Margins.Top := 4;
-    update_edit_panel.Margins.Bottom := 4;
-    update_edit_panel.Margins.Left := 8;
-    update_edit_panel.Margins.Right := 8;
-    update_edit_panel.AlignWithMargins := true;
-    update_edit_panel.Align := alTop;
+    DoPanelLayout(update_edit_panel, 'Update EDID of copies');
 
     input_search := TLabeledEdit.Create(frm);
     input_search.Parent := update_edit_panel;
     input_search.EditLabel.Caption := 'Search for';
     input_search.LabelPosition := lpLeft;
-    input_search.Margins.Top := 20;
-    input_search.Margins.Bottom := 2;
-    input_search.Margins.Left := 120;
-    input_search.Margins.Right := 8;
-    input_search.AlignWithMargins := true;
-    input_search.Align := alTop;
+    SetMarginsLayout(input_search, 20, 2, 120, 0, alTop);
 
     input_replace := TLabeledEdit.Create(frm);
     input_replace.Parent := update_edit_panel;
     input_replace.EditLabel.Caption := 'Replace with';
     input_replace.LabelPosition := lpLeft;
-    input_replace.Margins.Top := 2;
-    input_replace.Margins.Bottom := 2;
-    input_replace.Margins.Left := 120;
-    input_replace.Margins.Right := 8;
-    input_replace.AlignWithMargins := true;
-    input_replace.Align := alTop;
+    SetMarginsLayout(input_replace, 2, 2, 120, 0, alTop);
 
     input_suffix := TLabeledEdit.Create(frm);
     input_suffix.Parent := update_edit_panel;
     input_suffix.EditLabel.Caption := 'Add Suffix';
     input_suffix.LabelPosition := lpLeft;
-    input_suffix.Margins.Top := 2;
-    input_suffix.Margins.Bottom := 2;
-    input_suffix.Margins.Left := 120;
-    input_suffix.Margins.Right := 8;
-    input_suffix.AlignWithMargins := true;
-    input_suffix.Align := alTop;
+    SetMarginsLayout(input_suffix, 2, 2, 120, 0, alTop);
 
     button_panel := TPanel.Create(frm);
     button_panel.Parent := frm;
-    button_panel.Margins.Top := 4;
-    button_panel.Margins.Bottom := 4;
-    button_panel.Margins.Left := 0;
-    button_panel.Margins.Right := 0;
-    button_panel.AlignWithMargins := true;
-    button_panel.AutoSize := true;
-    button_panel.Align := alTop;
-    button_panel.BevelWidth := 0;
+    DoPanelLayout(button_panel, '');
 
     button_ok := TButton.Create(frm);
     button_ok.Parent := button_panel;
     button_ok.Caption := 'OK';
-    button_ok.Margins.Left := 4;
-    button_ok.Margins.Right := 4;
-    button_ok.AlignWithMargins := true;
-    button_ok.Align := alRight;
     button_ok.ModalResult := mrOk;
+    SetMarginsLayout(button_ok, 0, 0, 4, 0, alRight);
 
     button_cancel := TButton.Create(frm);
     button_cancel.Parent := button_panel;
     button_cancel.Caption := 'Cancel';
-    button_cancel.Margins.Left := 4;
-    button_cancel.Margins.Right := 8;
-    button_cancel.AlignWithMargins := true;
-    button_cancel.Align := alRight;
     button_cancel.ModalResult := mrCancel;
+    SetMarginsLayout(button_cancel, 0, 0, 4, 0, alRight);
 
     Result := frm.ShowModal;
+
+    if Result <> mrOk then
+      Exit;
 
     global_search_edid := input_search.Text;
     global_replace_edid := input_replace.Text;
