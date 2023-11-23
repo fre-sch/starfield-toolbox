@@ -67,3 +67,7 @@ In Blender add starfield_json_io.py as addon.
 * Create xedit JSON import script that can completely create new parts
 * Enable loading NIFs in Blender, early attempts show this is generally possible
   but is unusable due to the loading times of the starfield NIF importer.
+
+# Credits
+
+xedit team, everyone at xedit discord, and specifically rux616
