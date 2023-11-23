@@ -8,13 +8,6 @@ A collection of scripts to help modding Starfield.
 
 Copy a full ship part hierachy, can start at COBJ, FLST, GBFM.
 
-COBJ and FLST will be copied as overrides, while everything beyond GBFM is copied
-as new.
-
-TODO: Sometimes the script will fail when starting with COBJ/FLST. It appears, in
-some cases, the FormID house-keeping gets jumbled. In that case, start the script
-at the GBFMs and manually copy the COBJ and FLST as overrides.
-
 NOTE: The script cannot copy anything with REFL data, that is a limitation of
 xedit. In these cases, there will be NULL linked CELL children, remove these.
 
