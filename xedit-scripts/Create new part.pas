@@ -16,6 +16,7 @@ Const
   MSTT_STAT_COPY_SKIP_EDID = 'PrefabPackinPivotDummy,OutpostGroupPackinDummy';
   EXCLUDE_FILES_MASTERS = 'Starfield.esm,Starfield.exe,BlueprintShips-Starfield.esm,OldMars.esm,Constellation.esm';
   DEFAULT_EDID_SUFFIX = '_COPY';
+  DEFAULT_EDID_PREFIX = '';
 
 
 var
@@ -23,6 +24,7 @@ var
   global_search_edid: string;
   global_replace_edid: string;
   global_suffix_edid: string;
+  global_prefix_edid: string;
   global_cobj_copy: boolean;
   global_flst_copy: boolean;
   global_stat_copy: boolean;
@@ -52,7 +54,7 @@ begin
   new_value := StringReplace(
     old_value, global_search_edid, global_replace_edid,
     [rfReplaceAll]);
-  new_value := new_value + global_suffix_edid;
+  new_value := global_prefix_edid + new_value + global_suffix_edid;
   if not SameText(new_value, old_value) then
     SetEditorID(element, new_value);
 end;
@@ -379,6 +381,7 @@ var
   input_search: TLabeledEdit;
   input_replace: TLabeledEdit;
   input_suffix: TLabeledEdit;
+  input_prefix: TLabeledEdit;
   button_ok: TButton;
   button_cancel: TButton;
   button_panel: TPanel;
@@ -416,19 +419,19 @@ begin
     stat_copy := TCheckBox.Create(frm);
     stat_copy.Parent := options_panel;
     stat_copy.Caption := 'Copy STATs linked by REFR';
-    stat_copy.Checked := True;
+    stat_copy.Checked := global_stat_copy;
     SetMarginsLayout(stat_copy, 0, 0, 16, 0, alTop);
 
     mstt_copy := TCheckBox.Create(frm);
     mstt_copy.Parent := options_panel;
     mstt_copy.Caption := 'Copy MSTTs linked by REFR';
-    mstt_copy.Checked := True;
+    mstt_copy.Checked := global_mstt_copy;
     SetMarginsLayout(mstt_copy, 0, 0, 16, 0, alTop);
 
     stmp_copy := TCheckBox.Create(frm);
     stmp_copy.Parent := options_panel;
     stmp_copy.Caption := 'Copy STMPs linked by MSTT or STAT';
-    stmp_copy.Checked := True;
+    stmp_copy.Checked := global_stmp_copy;
     SetMarginsLayout(stmp_copy, 0, 0, 16, 0, alTop);
 
     update_edit_panel := TPanel.Create(frm);
@@ -447,11 +450,18 @@ begin
     input_replace.LabelPosition := lpLeft;
     SetMarginsLayout(input_replace, 2, 2, 120, 0, alTop);
 
+    input_prefix := TLabeledEdit.Create(frm);
+    input_prefix.Parent := update_edit_panel;
+    input_prefix.EditLabel.Caption := 'Add Prefix';
+    input_prefix.LabelPosition := lpLeft;
+    input_prefix.Text := global_prefix_edid;
+    SetMarginsLayout(input_prefix, 2, 2, 120, 0, alTop);
+
     input_suffix := TLabeledEdit.Create(frm);
     input_suffix.Parent := update_edit_panel;
     input_suffix.EditLabel.Caption := 'Add Suffix';
     input_suffix.LabelPosition := lpLeft;
-    input_suffix.Text := DEFAULT_EDID_SUFFIX;
+    input_suffix.Text := global_suffix_edid;
     SetMarginsLayout(input_suffix, 2, 2, 120, 0, alTop);
 
     button_panel := TPanel.Create(frm);
@@ -478,6 +488,7 @@ begin
     global_search_edid := input_search.Text;
     global_replace_edid := input_replace.Text;
     global_suffix_edid := input_suffix.Text;
+    global_prefix_edid := input_prefix.Text;
     global_cobj_copy := cobj_copy.Checked;
     global_flst_copy := flst_copy.Checked;
     global_stat_copy := stat_copy.Checked;
@@ -498,6 +509,8 @@ begin
   global_mstt_copy := True;
   global_stat_copy := True;
   global_stmp_copy := True;
+  global_prefix_edid := DEFAULT_EDID_PREFIX;
+  global_suffix_edid := DEFAULT_EDID_SUFFIX;
 end;
 
 
