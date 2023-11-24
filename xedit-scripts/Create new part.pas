@@ -15,6 +15,7 @@ Const
   START_SIGNATURES = 'COBJ,FLST,GBFM,CELL,REFR';
   MSTT_STAT_COPY_SKIP_EDID = 'PrefabPackinPivotDummy,OutpostGroupPackinDummy';
   EXCLUDE_FILES_MASTERS = 'Starfield.esm,Starfield.exe,BlueprintShips-Starfield.esm,OldMars.esm,Constellation.esm';
+  DEFAULT_EDID_SUFFIX = '_COPY';
 
 
 var
@@ -52,9 +53,8 @@ begin
     old_value, global_search_edid, global_replace_edid,
     [rfReplaceAll]);
   new_value := new_value + global_suffix_edid;
-  if SameText(new_value, old_value) then
-    new_value := old_value + '_COPY';
-  SetEditorID(element, new_value);
+  if not SameText(new_value, old_value) then
+    SetEditorID(element, new_value);
 end;
 
 
@@ -451,6 +451,7 @@ begin
     input_suffix.Parent := update_edit_panel;
     input_suffix.EditLabel.Caption := 'Add Suffix';
     input_suffix.LabelPosition := lpLeft;
+    input_suffix.Text := DEFAULT_EDID_SUFFIX;
     SetMarginsLayout(input_suffix, 2, 2, 120, 0, alTop);
 
     button_panel := TPanel.Create(frm);
