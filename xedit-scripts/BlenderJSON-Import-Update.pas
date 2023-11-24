@@ -4,12 +4,12 @@
 }
 unit BlenderJSONImportUpdate;
 
-uses BlenderJSON;
 
 const
   CELL_PERSISTENT_CHILDREN = 8;
   CELL_TEMPORARY_CHILDREN = 9;
   IMPORTABLE_SIGNATURES = 'CELL,REFR,MSTT,STMP,STMP.Node';
+  EXCLUDE_FILES_MASTERS = 'Starfield.esm,Starfield.exe,BlueprintShips-Starfield.esm,OldMars.esm,Constellation.esm';
 
 
 function FileByName(name: string): IwbFile;
@@ -31,10 +31,14 @@ function RecordByMeta(json_data: TJsonObject): IInterface;
 var
   record_file: IwbFile;
 begin
+  Result := nil;
+
+  if Pos(json_data.O['Meta'].S['FileName'], EXCLUDE_FILES_MASTERS) <> 0 then
+    Exit;
+
   record_file := FileByName(json_data.O['Meta'].S['FileName']);
   if not Assigned(record_file) then
   begin
-    Result := nil;
     AddMessage('file '+ json_data.O['Meta'].S['FileName'] + ' not found for: ' + json_data.O['Meta'].S['FormID']);
     Exit;
   end;
@@ -59,40 +63,41 @@ begin
 
   if not json_data.Contains('Meta') then
   begin
-    AddMessage('"Meta" object missing');
+    AddMessage('    Meta object missing');
     Exit;
   end;
 
   if not json_data.O['Meta'].Contains('FormID') then
   begin
-    AddMessage('"FormID" in meta object missing');
-    Exit;
-  end;
-
-  if not json_data.O['Meta'].Contains('EDID') then
-  begin
-    AddMessage('"EDID" in meta object missing');
+    AddMessage('    Meta.FormID missing');
     Exit;
   end;
 
   if not json_data.O['Meta'].Contains('Signature') then
   begin
-    AddMessage('"Signature" in meta object missing');
+    AddMessage('    Meta.Signature missing');
     Exit;
   end;
+
+  // TODO: not sure how useful this warning really is, when REFR and STMP.Node
+  // and maybe others just don't have an EDID, and the script doesn't really do
+  // anything with the EDID
+  // if not json_data.O['Meta'].Contains('EDID') then
+  // begin
+  //   AddMessage('    Warning: Meta.EDID missing');
+  // end;
 
   meta_signature := json_data.O['Meta'].S['Signature'];
   if Pos(meta_signature, check_signature) = 0 then
   begin
-    AddMessage('Signature ' + meta_signature + ' in meta not supported');
+    AddMessage('    Meta.Signature ' + meta_signature + ' not supported (' + json_data.O['Meta'].S['Name'] + ').');
     Exit;
   end;
 
   Result := true;
 end;
 
-
-procedure importRotation(element: IInterface; json_data: TJsonObject);
+procedure importXYZ(element: IInterface; json_data: TJsonObject);
 begin
   SetElementEditValues(element, 'X', json_data.S['X']);
   SetElementEditValues(element, 'Y', json_data.S['Y']);
@@ -100,15 +105,7 @@ begin
 end;
 
 
-procedure importOffset(element: IInterface; json_data: TJsonObject);
-begin
-  SetElementEditValues(element, 'X', json_data.S['X']);
-  SetElementEditValues(element, 'Y', json_data.S['Y']);
-  SetElementEditValues(element, 'Z', json_data.S['Z']);
-end;
-
-
-procedure ImportCellJSON(json_data: TJsonObject);
+procedure ImportCellJson(json_data: TJsonObject);
 var
   i: integer;
   cell_items: TJsonArray;
@@ -116,7 +113,8 @@ begin
   if not ValidateMetaJSON(json_data, 'CELL') then
     Exit;
 
-  AddMessage('import cell json: ' + json_data.O['Meta'].S['FormID']);
+  AddMessage('-- import cell json: ' + json_data.O['Meta'].S['Name']);
+
   if json_data.Contains('Temporary') then
   begin
     cell_items := json_data.A['Temporary'];
@@ -135,41 +133,42 @@ begin
 end;
 
 
-procedure ImportRefrJSON(json_data: TJsonObject);
+procedure ImportRefrJson(json_data: TJsonObject);
 var
   target_record: IInterface;
 begin
   if not ValidateMetaJSON(json_data, 'REFR') then
     Exit;
 
-  AddMessage('-- import REFR json: ' + json_data.O['Meta'].S['FormID']);
   target_record := RecordByMeta(json_data);
   if Assigned(target_record) then
   begin
-    AddMessage('    target_record: ' + Name(target_record));
-    importRotation(
+    AddMessage('-- import REFR json: ' + Name(target_record));
+    importXYZ(
       ElementByPath(target_record, 'DATA\Rotation'),
-      json_data.O['Rotation']
+      json_data.O['DATA'].O['Rotation']
     );
-    importOffset(
+    importXYZ(
       ElementByPath(target_record, 'DATA\Position'),
-      json_data.O['Offset']
+      json_data.O['DATA'].O['Offset']
     );
-    if json_data.Contains('NAM') then
-      ImportJson(json_data.O['NAM']);
+    if json_data.Contains('NAME') then
+      ImportJson(json_data.O['NAME']);
   end;
 end;
 
 
-procedure importMttStatJson(json_data: TJsonObject);
+procedure ImportMsttOrStatJson(json_data: TJsonObject);
+var
+  target_record: IInterface;
 begin
   if not ValidateMetaJSON(json_data, 'MSTT,STAT') then
     Exit;
 
-  AddMessage('-- import MSTT/STAT json: ' + json_data.O['Meta'].S['FormID']);
   target_record := RecordByMeta(json_data);
   if Assigned(target_record) then
   begin
+    AddMessage('-- import MSTT/STAT json: ' + Name(target_record));
     SetElementEditValues(target_record, 'Model\MODL', json_data.S['MODL']);
     if json_data.Contains('SNTP') then
       ImportJson(json_data.O['SNTP']);
@@ -181,16 +180,16 @@ procedure importStmpEnamNodeJson(enam_element: IInterface; json_data: TJsonObjec
 begin
   SetElementEditValues(enam_element, 'Node ID', json_data.S['Node ID']);
   SetElementEditValues(enam_element, 'Node', json_data.S['Node']);
-  importRotation(
+  importXYZ(
     ElementByPath(enam_element, 'Orientation\Rotation'),
     json_data.O['Orientation'].O['Rotation']);
-  importOffset(
+  importXYZ(
     ElementByPath(enam_element, 'Orientation\Offset'),
     json_data.O['Orientation'].O['Offset']);
 end;
 
 
-procedure importSTMPJson(json_data: TJsonObject);
+procedure ImportStmpJson(json_data: TJsonObject);
 var
   target_record: IInterface;
   enam_items: TJsonArray;
@@ -203,11 +202,15 @@ begin
   if not ValidateMetaJSON(json_data, 'STMP') then
     Exit;
 
-  AddMessage('import STMP json: ' + json_data.O['Meta'].S['FormID']);
   target_record := RecordByMeta(json_data);
+  if not Assigned(target_record) then
+    Exit;
+
+  AddMessage('-- import STMP json: ' + Name(target_record));
+
   if not json_data.Contains('ENAM') then
   begin
-    AddMessage('missing ENAM');
+    AddMessage('     missing ENAM');
     Exit;
   end;
 
@@ -242,19 +245,19 @@ begin
   start_signature := json_data.O['Meta'].S['Signature'];
 
   if start_signature = 'CELL' then
-    ImportCellJSON(json_data)
+    ImportCellJson(json_data)
 
   else if start_signature = 'REFR' then
-    ImportRefrJSON(json_data)
+    ImportRefrJson(json_data)
 
   else if start_signature = 'MSTT' then
-    importMttStatJson(json_data)
+    ImportMsttOrStatJson(json_data)
 
   else if start_signature = 'STAT' then
-    importMttStatJson(json_data)
+    ImportMsttOrStatJson(json_data)
 
   else if start_signature = 'STMP' then
-    importSTMPJson(json_data)
+    ImportStmpJson(json_data)
   ;
 end;
 

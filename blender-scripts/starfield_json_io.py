@@ -64,6 +64,8 @@ from unittest.mock import Mock
 #     return bpy.context.active_object
 
 
+FLOAT_ROUND_DIGITS = 4
+
 def f(value):
     return round(float(value), 3)
 
@@ -73,7 +75,7 @@ def rf(value):
 
 
 def degrees_str(value):
-    degrees = round(math.degrees(value), 4)
+    degrees = round(math.degrees(value), FLOAT_ROUND_DIGITS)
     if degrees < 0:
         degrees = 360 + degrees
     return str(degrees)
@@ -101,32 +103,30 @@ def make_rotation_matrix(x, y, z):
     return rot_z @ rot_x @ rot_y
 
 
-def import_orientation(operator, orientation_json):
+def import_orientation(operator, orientation_json, mat_conv=None):
     offset = orientation_json["Offset"]
     mat_loc = Matrix.Translation((
-        -f(offset["X"]),
+        f(offset["X"]),
         f(offset["Y"]),
         f(offset["Z"]),
     ))
     rotation = orientation_json["Rotation"]
-    # mat_conv = axis_conversion(
-    #     from_forward='Y', from_up="Z",
-    #     to_forward='-Y', to_up='Z').to_4x4()
-    mat_conv = Matrix.Identity(4)
     mat_rot = make_rotation_matrix(
         f(rotation["X"]),
-        -f(rotation["Y"]),
+        f(rotation["Y"]),
         f(rotation["Z"])
     )
+    if mat_conv is None:
+        mat_conv = Matrix.Identity(4)
     return mat_conv @ mat_loc @ mat_rot
 
 
 def export_orientation(operator: Operator, context: Context, obj):
-    # mat_conv = axis_conversion(
-    #     from_forward='-Y', from_up="Z",
-    #     to_forward='Y', to_up='Z').to_4x4()
-    # mat = mat_conv @ obj.matrix_world
-    mat = obj.matrix_world
+    mat_conv = axis_conversion(
+        from_forward='-Y', from_up="Z",
+        to_forward='Y', to_up='Z').to_4x4()
+    mat = mat_conv @ obj.matrix_world
+    # mat = obj.matrix_world
     translation, rotation, scale = mat.decompose()
     # decompose rotation to euler as inverse order of
     # mat_rot = rot_z @ rot_x @ rot_y
@@ -134,9 +134,9 @@ def export_orientation(operator: Operator, context: Context, obj):
     rotation_euler = rotation.to_euler("YXZ")
     return {
         "Offset": {
-            "X": str(round(translation.x, 6)),
-            "Y": str(round(translation.y, 6)),
-            "Z": str(round(translation.z, 6)),
+            "X": str(round(translation.x, FLOAT_ROUND_DIGITS)),
+            "Y": str(round(translation.y, FLOAT_ROUND_DIGITS)),
+            "Z": str(round(translation.z, FLOAT_ROUND_DIGITS)),
         },
         "Rotation": {
             "X": degrees_str(rotation_euler.x),
@@ -146,27 +146,33 @@ def export_orientation(operator: Operator, context: Context, obj):
     }
 
 
-def import_stmp(operator, json_data, target_collection):
+def import_stmp(operator, json_data, target_collection, matrix_axis_conv=None):
     new_obj = import_obj_meta(operator, json_data)
+
+    if matrix_axis_conv is not None:
+        new_obj.matrix_world = matrix_axis_conv
+
     target_collection.objects.link(new_obj)
 
     for enam_json in json_data["ENAM"]:
-        enam_obj = bpy.data.objects.new(
-            f'{enam_json["Node ID"]}-{enam_json["Name"]}', None)
+        enam_obj = bpy.data.objects.new(enam_json["Meta"]["Name"], None)
         enam_obj.empty_display_type = operator.display_snap_type
         enam_obj.empty_display_size = 0.5
         enam_obj.show_name = operator.show_name
         StarfieldJsonPropertyGroup.from_json(enam_obj, enam_json)
-        enam_obj.matrix_basis = import_orientation(
-            operator, enam_json["Orientation"])
+        enam_obj.matrix_basis = import_orientation(operator, enam_json["Orientation"])
         enam_obj.parent = new_obj
         target_collection.objects.link(enam_obj)
 
     return new_obj
 
 
-def import_refr_child(operator, json_data, target_collection):
+def import_refr_child(operator, json_data, target_collection, matrix_axis_conv=None):
     new_obj = import_obj_meta(operator, json_data)
+
+    if matrix_axis_conv is not None:
+        new_obj.matrix_world = matrix_axis_conv
+
     target_collection.objects.link(new_obj)
 
     # if json_data.get("MODL"):
@@ -184,9 +190,11 @@ def import_refr_child(operator, json_data, target_collection):
     return new_obj
 
 
-def import_refr(operator, json_data, target_collection):
+def import_refr(operator, json_data, target_collection, matrix_axis_conv=None):
     new_obj = import_obj_meta(operator, json_data)
-    new_obj.matrix_basis = import_orientation(operator, json_data["DATA"])
+
+    new_obj.matrix_basis = import_orientation(operator, json_data["DATA"], matrix_axis_conv)
+
     target_collection.objects.link(new_obj)
 
     if json_data.get("NAME"):
@@ -195,8 +203,12 @@ def import_refr(operator, json_data, target_collection):
     return new_obj
 
 
-def import_cell(operator, json_data, target_collection):
+def import_cell(operator, json_data, target_collection, matrix_axis_conv=None):
     new_obj = import_obj_meta(operator, json_data)
+
+    if matrix_axis_conv is not None:
+        new_obj.matrix_world = matrix_axis_conv
+
     target_collection.objects.link(new_obj)
 
     for item in json_data["Temporary"]:
@@ -308,14 +320,22 @@ def read_json_file(operator: Operator, context: Context, filepath: str):
     else:
         target_collection = context.view_layer.active_layer_collection.collection
 
+    matrix_axis_conv = axis_conversion(
+        from_forward='Y', from_up="Z",
+        to_forward='-Y', to_up='Z').to_4x4()
+
     if data["Meta"]["Signature"] == "CELL":
-        import_cell(operator, data, target_collection)
+        import_cell(operator, data, target_collection, matrix_axis_conv)
+
     elif data["Meta"]["Signature"] == "REFR":
-        import_refr(operator, data, target_collection)
+        import_refr(operator, data, target_collection, matrix_axis_conv)
+
     elif data["Meta"]["Signature"] in "MSTT,STAT":
-        import_refr_child(operator, data, target_collection)
+        import_refr_child(operator, data, target_collection, matrix_axis_conv)
+
     elif data["Meta"]["Signature"] == "STMP":
-        import_stmp(operator, data, target_collection)
+        import_stmp(operator, data, target_collection, matrix_axis_conv)
+
     else:
         operator.report({"WARNING"}, f"expected meta signature (CELL,REFR,MSTT,STAT,STMP), got `{data['Meta']['Signature']}`")
         return {"CANCELLED"}
@@ -410,31 +430,31 @@ class StarfieldJsonPropertyGroup(PropertyGroup):
         obj.starfield_json.name = obj_json["Meta"].get("Name", "")
         if obj_json["Meta"].get("Signature", "") == "STMP.Node":
             obj.starfield_json.node_id = obj_json.get("Node ID", "")
-            obj.starfield_json.snap_name = obj_json.get("Name", "NONE")
+            obj.starfield_json.snap_name = obj_json.get("Node", "NONE")
         obj.starfield_json.model_path = obj_json.get("MODL", "")
         # refr_group is handled separately
 
     def is_valid(self):
-        return bool(self.starfield_json.signature)
+        return bool(self.signature)
 
     def to_json(self):
         obj_json = {"Meta": {}}
-        if self.starfield_json.signature:
-            obj_json["Meta"]["Signature"] = self.starfield_json.signature
-        if self.starfield_json.editor_id:
-            obj_json["Meta"]["EDID"] = self.starfield_json.editor_id
-        if self.starfield_json.form_id:
-            obj_json["Meta"]["FormID"] = self.starfield_json.form_id
-        if self.starfield_json.file_name:
-            obj_json["Meta"]["FileName"] = self.starfield_json.file_name
-        if self.starfield_json.name:
-            obj_json["Meta"]["Name"] = self.starfield_json.name
-        if self.starfield_json.node_id:
-            obj_json["Node ID"] = self.starfield_json.node_id
-        if self.starfield_json.snap_name:
-            obj_json["Name"] = self.starfield_json.snap_name
-        if self.starfield_json.model_path:
-            obj_json["MODL"] = self.starfield_json.model_path
+        if self.signature:
+            obj_json["Meta"]["Signature"] = self.signature
+        if self.editor_id:
+            obj_json["Meta"]["EDID"] = self.editor_id
+        if self.form_id:
+            obj_json["Meta"]["FormID"] = self.form_id
+        if self.file_name:
+            obj_json["Meta"]["FileName"] = self.file_name
+        if self.name:
+            obj_json["Meta"]["Name"] = self.name
+        if self.node_id:
+            obj_json["Node ID"] = self.node_id
+        if self.snap_name and self.snap_name != "NONE":
+            obj_json["Node"] = self.snap_name
+        if self.model_path:
+            obj_json["MODL"] = self.model_path
         # refr_group is handled separately
         return obj_json
 

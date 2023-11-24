@@ -3,8 +3,6 @@
 }
 unit BlenderJSONExport;
 
-uses BlenderJSON;
-
 const
   CELL_PERSISTENT_CHILDREN = 8;
   CELL_TEMPORARY_CHILDREN = 9;
@@ -25,32 +23,34 @@ begin
 end;
 
 
+procedure ProcessXYZ(element: IInterface; result_json: TJsonObject);
+begin
+  result_json.S['X'] := GetElementEditValues(element, 'X');
+  result_json.S['Y'] := GetElementEditValues(element, 'Y');
+  result_json.S['Z'] := GetElementEditValues(element, 'Z');
+end;
+
+
 procedure ProcessOrientation(
   offset_element, rotation_element: IInterface;
   result_json: TJsonObject);
-var
-  offset_json: TJsonObject;
-  rotation_json: TJsonObject;
-
 begin
-  offset_json := result_json.O['Offset'];
-  rotation_json := result_json.O['Rotation'];
-
-  offset_json.S['X'] := GetElementEditValues(offset_element, 'X');
-  offset_json.S['Y'] := GetElementEditValues(offset_element, 'Y');
-  offset_json.S['Z'] := GetElementEditValues(offset_element, 'Z');
-
-  rotation_json.S['X'] := GetElementEditValues(rotation_element, 'X');
-  rotation_json.S['Y'] := GetElementEditValues(rotation_element, 'Y');
-  rotation_json.S['Z'] := GetElementEditValues(rotation_element, 'Z');
+  ProcessXYZ(offset_element, result_json.O['Offset']);
+  ProcessXYZ(rotation_element, result_json.O['Rotation']);
 end;
 
 
 procedure ProcessSTMPNode(node_element: IInterface; result_json: TJsonObject);
+var
+  node_id: string;
+  node_name: string;
 begin
+  node_id := GetElementEditValues(node_element, 'Node ID');
+  node_name := GetElementEditValues(node_element, 'Node');
   result_json.O['Meta'].S['Signature'] := 'STMP.Node';
-  result_json.S['Node ID'] := GetElementEditValues(node_element, 'Node ID');
-  result_json.S['Name'] := GetElementEditValues(node_element, 'Node');
+  result_json.O['Meta'].S['Name'] := node_id + ':' + node_name;
+  result_json.S['Node ID'] := node_id;
+  result_json.S['Node'] := node_name;
   ProcessOrientation(
     ElementByPath(node_element, 'Orientation\Offset'),
     ElementByPath(node_element, 'Orientation\Rotation'),
@@ -82,6 +82,8 @@ begin
   ProcessMeta(subrecord, result_json);
 
   result_json.S['MODL'] := GetElementEditValues(subrecord, 'Model\MODL');
+  ProcessXYZ(ElementByPath(subrecord, 'OBND\Min'), result_json.O['OBND'].O['Min']);
+  ProcessXYZ(ElementByPath(subrecord, 'OBND\Max'), result_json.O['OBND'].O['Max']);
 
   stmp_record := LinksTo(ElementBySignature(subrecord, 'SNTP'));
   if not Assigned(stmp_record) then Exit;
