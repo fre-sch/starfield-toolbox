@@ -74,12 +74,8 @@ from unittest.mock import Mock
 FLOAT_ROUND_DIGITS = 4
 
 
-def f(value):
-    return round(float(value), 3)
-
-
-def rf(value):
-    return math.radians(f(value))
+def round_(value):
+    return round(value, FLOAT_ROUND_DIGITS)
 
 
 def degrees_str(value):
@@ -88,7 +84,7 @@ def degrees_str(value):
 
 
 def obj_name(json_data):
-    if json_data["Meta"]["EDID"]:
+    if json_data["Meta"].get("EDID"):
         return json_data["Meta"]["EDID"]
     return f'{json_data["Meta"]["Signature"]}:{json_data["Meta"]["FormID"]}'
 
@@ -109,34 +105,28 @@ def make_rotation_matrix(x, y, z):
     e = Euler((rx, ry, rz), "YXZ")
     return e.to_matrix().to_4x4()
 
-    # rot_x = Matrix.Rotation(, 4, "X")
-    # rot_y = Matrix.Rotation(math.radians(y), 4, "Y")
-    # rot_z = Matrix.Rotation(math.radians(z), 4, "Z")
-    # return rot_z @ rot_x @ rot_y
-    # return rot_z @ rot_y @ rot_x
-    # return rot_y @ rot_x @ rot_z
-    # return rot_y @ rot_z @ rot_x
-    # return rot_x @ rot_y @ rot_z
-    # return rot_x @ rot_z @ rot_y
-
 
 def import_orientation(operator, orientation_json, invert=False):
     """
     :param invert: bool, for REFR, since in-game angles are inverted
     """
-    sign = -1 if invert else 1
     offset = orientation_json["Offset"]
     mat_loc = Matrix.Translation(
         (
-            f(offset["X"]),
-            f(offset["Y"]),
-            f(offset["Z"]),
+            float(offset["X"]),
+            float(offset["Y"]),
+            float(offset["Z"]),
         )
     )
     rotation = orientation_json["Rotation"]
-    mat_rot = make_rotation_matrix(
-        sign * f(rotation["X"]), sign * f(rotation["Y"]), sign * f(rotation["Z"])
-    )
+    rot_x = float(rotation["X"])
+    rot_y = float(rotation["Y"])
+    rot_z = float(rotation["Z"])
+    if invert:
+        rot_x = 360.0 - rot_x
+        rot_y = 360.0 - rot_y
+        rot_z = 360.0 - rot_z
+    mat_rot = make_rotation_matrix(rot_x, rot_y, rot_z)
     return mat_loc @ mat_rot
 
 
@@ -146,22 +136,27 @@ def export_orientation(operator: Operator, context: Context, obj, invert=False):
     """
     sign = -1 if invert else 1
     mat = obj.matrix_world
-    translation, rotation, scale = mat.decompose()
-    # decompose rotation to euler as inverse order of
-    # mat_rot = rot_z @ rot_x @ rot_y
-    # in import_orientation
-    # rotation_euler = rotation.to_euler("YXZ")
-    rotation_euler = rotation.to_euler("YXZ")
+    translation = mat.to_translation()
+    # decompose rotation to euler as inverse order of import
+    rot = mat.to_euler("XYZ")
+    rot_x = math.degrees(rot.x)
+    rot_y = math.degrees(rot.y)
+    rot_z = math.degrees(rot.z)
+    if invert:
+        rot_x = 360.0 - rot_x
+        rot_y = 360.0 - rot_y
+        rot_z = 360.0 - rot_z
+
     return {
         "Offset": {
-            "X": str(round(translation.x, FLOAT_ROUND_DIGITS)),
-            "Y": str(round(translation.y, FLOAT_ROUND_DIGITS)),
-            "Z": str(round(translation.z, FLOAT_ROUND_DIGITS)),
+            "X": str(round_(translation.x)),
+            "Y": str(round_(translation.y)),
+            "Z": str(round_(translation.z)),
         },
         "Rotation": {
-            "X": degrees_str(sign * rotation_euler.x),
-            "Y": degrees_str(sign * rotation_euler.y),
-            "Z": degrees_str(sign * rotation_euler.z),
+            "X": str(round_(rot_x)),
+            "Y": str(round_(rot_y)),
+            "Z": str(round_(rot_z)),
         },
     }
 
@@ -206,7 +201,9 @@ def import_refr_child(operator, json_data, target_collection):
 
 def import_refr(operator, json_data, target_collection):
     new_obj = import_obj_meta(operator, json_data)
-    new_obj.matrix_basis = import_orientation(operator, json_data["DATA"], invert=True)
+    new_obj.matrix_world = import_orientation(
+        operator, json_data["DATA"], invert=True
+    )
 
     target_collection.objects.link(new_obj)
 
@@ -631,16 +628,45 @@ class StarfieldJsonExport(Operator, ExportHelper):
 
 
 SnapGizmoShapeVerts = (
-    (0.0, 0.0, -1.476), (-0.607, 0.0, -0.262), (-1.0, 0.0, 0.0), (0.0, 0.0, -1.476),
-    (-1.0, 0.0, 0.0), (0.0, 0.0, -2.0), (0.0, 0.0, -2.0), (1.0, 0.0, 0.0),
-    (0.607, 0.0, -0.262), (0.0, 0.0, -2.0), (0.607, 0.0, -0.262), (0.0, 0.0, -1.476),
-    (0.0, 0.0, -1.476), (0.0, 0.0, -0.262), (-0.607, 0.0, -0.262), (0.0, 0.0, 0.0),
-    (-1.0, 0.0, 0.0), (-0.607, 0.0, -0.262), (0.0, 0.0, 0.0), (-0.607, 0.0, -0.262),
-    (0.0, 0.0, -0.262), (1.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, -0.262),
-    (1.0, 0.0, 0.0), (0.0, 0.0, -0.262), (0.607, 0.0, -0.262), (0.0, -1.0, -0.0),
-    (0.0, 0.0, -0.0), (0.0, 0.0, -0.262), (0.0, -1.0, -0.0), (0.0, 0.0, -0.262),
-    (0.0, -0.607, -0.262), (0.0, 0.0, -2.0), (0.0, -1.0, -0.0), (0.0, -0.607, -0.262),
-    (0.0, 0.0, -2.0), (0.0, -0.607, -0.262), (0.0, 0.0, -1.476),
+    (0.0, 0.0, -1.476),
+    (-0.607, 0.0, -0.262),
+    (-1.0, 0.0, 0.0),
+    (0.0, 0.0, -1.476),
+    (-1.0, 0.0, 0.0),
+    (0.0, 0.0, -2.0),
+    (0.0, 0.0, -2.0),
+    (1.0, 0.0, 0.0),
+    (0.607, 0.0, -0.262),
+    (0.0, 0.0, -2.0),
+    (0.607, 0.0, -0.262),
+    (0.0, 0.0, -1.476),
+    (0.0, 0.0, -1.476),
+    (0.0, 0.0, -0.262),
+    (-0.607, 0.0, -0.262),
+    (0.0, 0.0, 0.0),
+    (-1.0, 0.0, 0.0),
+    (-0.607, 0.0, -0.262),
+    (0.0, 0.0, 0.0),
+    (-0.607, 0.0, -0.262),
+    (0.0, 0.0, -0.262),
+    (1.0, 0.0, 0.0),
+    (0.0, 0.0, 0.0),
+    (0.0, 0.0, -0.262),
+    (1.0, 0.0, 0.0),
+    (0.0, 0.0, -0.262),
+    (0.607, 0.0, -0.262),
+    (0.0, -1.0, -0.0),
+    (0.0, 0.0, -0.0),
+    (0.0, 0.0, -0.262),
+    (0.0, -1.0, -0.0),
+    (0.0, 0.0, -0.262),
+    (0.0, -0.607, -0.262),
+    (0.0, 0.0, -2.0),
+    (0.0, -1.0, -0.0),
+    (0.0, -0.607, -0.262),
+    (0.0, 0.0, -2.0),
+    (0.0, -0.607, -0.262),
+    (0.0, 0.0, -1.476),
 )
 
 
