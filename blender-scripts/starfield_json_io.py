@@ -130,7 +130,9 @@ def import_orientation(operator, orientation_json, invert=False):
     return mat_loc @ mat_rot
 
 
-def export_orientation(operator: Operator, context: Context, obj, invert=False):
+def export_orientation(
+    operator: Operator, context: Context, obj, invert=False, order="XYZ"
+):
     """
     :param invert: bool, for REFR, since those require inverted angles in-game
     """
@@ -138,7 +140,7 @@ def export_orientation(operator: Operator, context: Context, obj, invert=False):
     mat = obj.matrix_world
     translation = mat.to_translation()
     # decompose rotation to euler as inverse order of import
-    rot = mat.to_euler("XYZ")
+    rot = mat.to_euler(order)
     rot_x = math.degrees(rot.x)
     rot_y = math.degrees(rot.y)
     rot_z = math.degrees(rot.z)
@@ -320,10 +322,17 @@ def export_stmp(operator: Operator, context: Context, obj):
             )
             continue
         child_data = child_obj.starfield_json.to_json()
+        # TODO: figure out why this is different for equipment nodes
+        is_equipment_node = (
+            "Node" in child_data and "Equipment" in child_data["Node"]
+        )
+        orientation_order = "YXZ" if is_equipment_node else "XYZ"
         data["ENAM"].append(
             {
                 **child_data,
-                "Orientation": export_orientation(operator, context, child_obj),
+                "Orientation": export_orientation(
+                    operator, context, child_obj, order=orientation_order
+                ),
             }
         )
 
