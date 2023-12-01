@@ -81,13 +81,13 @@ var
 begin
   AddMessage('-- ' + Signature(subrecord_source) + ': ' + Name(subrecord_source));
 
-  if (Signature(subrecord_source) = 'MSTT') and global_mstt_copy then
+  if (Signature(subrecord_source) = 'MSTT') and (not global_mstt_copy) then
   begin
     AddMessage('    skipping, global_mstt_copy');
     Exit;
   end;
 
-  if (Signature(subrecord_source) = 'STAT') and global_stat_copy then
+  if (Signature(subrecord_source) = 'STAT') and (not global_stat_copy) then
   begin
     AddMessage('    skipping, global_stat_copy');
     Exit;
