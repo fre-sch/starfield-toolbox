@@ -93,6 +93,7 @@ end;
 procedure ProcessRefrData(refr_record: IInterface; result_json: TJsonObject);
 var
   data_element: IInterface;
+  xscal_element: IInterface;
 begin
   data_element := ElementBySignature(refr_record, 'DATA');
   if not Assigned(data_element) then Exit;
@@ -101,6 +102,9 @@ begin
     ElementByPath(data_element, 'Rotation'),
     result_json.O['DATA']
   );
+  xscal_element := ElementBySignature(refr_record, 'XSCL');
+  if Assigned(xscal_element) then
+    result_json.S['XSCL'] = GetEditValue(refr_record);
 end;
 
 
