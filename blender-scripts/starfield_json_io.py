@@ -30,6 +30,7 @@ import json
 from mathutils import Matrix, Quaternion, Euler
 import math
 from os.path import basename, join as pathjoin
+from pathlib import Path
 from dataclasses import dataclass
 from unittest.mock import Mock
 
@@ -74,18 +75,28 @@ from unittest.mock import Mock
 FLOAT_ROUND_DIGITS = 4
 
 
+def angle_360(value):
+    value = round_(value % 360.0)
+    if value == -180.0: value = 180.0
+    if value == 360.0: value = 0.0
+    return value
+
+
 def round_(value):
     return round(value, FLOAT_ROUND_DIGITS)
 
 
-def degrees_str(value):
-    degrees = round(math.degrees(value), FLOAT_ROUND_DIGITS)
-    return str(degrees)
-
-
 def obj_name(json_data):
+    # might be empty, might not have EDID key
     if json_data["Meta"].get("EDID"):
         return json_data["Meta"]["EDID"]
+
+    if json_data["Meta"]["Signature"] == "REFR":
+        try:
+            return f"REFR:{json_data['NAME']['Meta']['EDID']}"
+        except KeyError:
+            pass
+
     return f'{json_data["Meta"]["Signature"]}:{json_data["Meta"]["FormID"]}'
 
 
@@ -123,9 +134,9 @@ def import_orientation(operator, orientation_json, invert=False):
     rot_y = float(rotation["Y"])
     rot_z = float(rotation["Z"])
     if invert:
-        rot_x = 360.0 - rot_x
-        rot_y = 360.0 - rot_y
-        rot_z = 360.0 - rot_z
+        rot_x = (360 - rot_x) % 360.0
+        rot_y = (360 - rot_y) % 360.0
+        rot_z = (360 - rot_z) % 360.0
     mat_rot = make_rotation_matrix(rot_x, rot_y, rot_z)
     return mat_loc @ mat_rot
 
@@ -135,31 +146,25 @@ def export_orientation(
 ):
     """
     :param invert: bool, for REFR, since those require inverted angles in-game
+    :param order: str, order of rotations
     """
-    sign = -1 if invert else 1
     mat = obj.matrix_world
     translation = mat.to_translation()
     # decompose rotation to euler as inverse order of import
     rot = mat.to_euler(order)
-    rot_x = math.degrees(rot.x)
-    rot_y = math.degrees(rot.y)
-    rot_z = math.degrees(rot.z)
+    rot = [math.degrees(it) for it in rot]
     if invert:
-        rot_x = 360.0 - rot_x
-        rot_y = 360.0 - rot_y
-        rot_z = 360.0 - rot_z
+        rot = [360 - it for it in rot]
+    rot = [str(angle_360(it)) for it in rot]
 
+    # not using f-string here, because that will still output e-notation
     return {
         "Offset": {
             "X": str(round_(translation.x)),
             "Y": str(round_(translation.y)),
             "Z": str(round_(translation.z)),
         },
-        "Rotation": {
-            "X": str(round_(rot_x)),
-            "Y": str(round_(rot_y)),
-            "Z": str(round_(rot_z)),
-        },
+        "Rotation": dict(zip("XYZ", rot)),
     }
 
 
@@ -629,7 +634,10 @@ class StarfieldJsonExport(Operator, ExportHelper):
     filter_glob: StringProperty(default="*.json", options={"HIDDEN"})
 
     def invoke(self, context, _event):
-        self.filepath = f"{context.active_object.name}.json"
+        preset_filepath = Path(self.filepath)
+        self.filepath = str(
+            preset_filepath.parent / f"{context.active_object.name}.json"
+        )
         return super().invoke(context, _event)
 
     def execute(self, context: Context):
