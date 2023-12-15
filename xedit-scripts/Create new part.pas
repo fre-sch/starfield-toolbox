@@ -240,6 +240,18 @@ begin
 end;
 
 
+function ProcessWEAP(weap_source: IInterface): IInterface;
+var
+  weap_copy: IInterface;
+begin
+  AddMessage('-- WEAP: ' + Name(weap_source));
+  weap_copy := wbCopyElementToFile(weap_source, global_target_file, True, True);
+  UpdateEditorID(weap_copy);
+  AddMessage('    copy as new: ' + Name(weap_copy));
+  Result := weap_copy;
+end;
+
+
 function ProcessFLST(flst_source: IInterface): IInterface;
 var
   flst_new: IInterface;
@@ -332,6 +344,10 @@ begin
 
   else if element_signature = 'STMP' then
     Result := ProcessSTMP(element)
+
+  else if element_signature = 'WEAP' then
+    Result := ProcessWEAP(element)
+
   else
     AddMessage('unhandled signature ' + element_signature + ', element ' + Name(element))
   ;
