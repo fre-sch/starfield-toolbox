@@ -1,166 +1,169 @@
 {
 
 }
-unit ExportToBlenderJSON;
+unit BlenderJSONExport;
 
-Const
-  CellPersistentChildren = 8;
-  CellTemporaryChildren = 9;
-  StartSignatures = 'CELL,REFR,MSTT,STMP';
+const
+  CELL_PERSISTENT_CHILDREN = 8;
+  CELL_TEMPORARY_CHILDREN = 9;
+  START_SIGNATURES = 'CELL,REFR,MSTT,STAT,STMP';
 
 var
-  OutFilePath: string;
+  global_target_path: string;
 
 
-procedure ProcessMeta(element: IInterface; jsonObj: TJsonObject);
+procedure ProcessMeta(element: IInterface; result_json: TJsonObject);
 begin
-  jsonObj.O['Meta'].S['FormID'] := IntToHex64(FixedFormID(element), 8);
-  jsonObj.O['Meta'].S['Name'] := Name(element);
-  jsonObj.O['Meta'].S['EDID'] := EditorID(element);
-  jsonObj.O['Meta'].S['Signature'] := Signature(element);
-  jsonObj.O['Meta'].S['FileName'] := GetFileName(GetFile(element));
+  result_json.O['Meta'].S['FormID'] := IntToHex64(FixedFormID(element), 8);
+  result_json.O['Meta'].S['EDID'] := EditorID(element);
+  result_json.O['Meta'].S['Signature'] := Signature(element);
+  // these are informative only
+  result_json.O['Meta'].S['FileName'] := GetFileName(GetFile(element));
+  result_json.O['Meta'].S['Name'] := Name(element);
+end;
+
+
+procedure ProcessXYZ(element: IInterface; result_json: TJsonObject);
+begin
+  result_json.S['X'] := GetElementEditValues(element, 'X');
+  result_json.S['Y'] := GetElementEditValues(element, 'Y');
+  result_json.S['Z'] := GetElementEditValues(element, 'Z');
 end;
 
 
 procedure ProcessOrientation(
-  offsetElement: IInterface; rotationElement: IInterface;
-  jsonObj: TJsonObject);
-var
-  offsetJson: TJsonObject;
-  rotationJson: TJsonObject;
-
+  offset_element, rotation_element: IInterface;
+  result_json: TJsonObject);
 begin
-  offsetJson := jsonObj.O['Offset'];
-  rotationJson := jsonObj.O['Rotation'];
-
-  offsetJson.S['X'] := GetElementEditValues(offsetElement, 'X');
-  offsetJson.S['Y'] := GetElementEditValues(offsetElement, 'Y');
-  offsetJson.S['Z'] := GetElementEditValues(offsetElement, 'Z');
-
-  rotationJson.S['X'] := GetElementEditValues(rotationElement, 'X');
-  rotationJson.S['Y'] := GetElementEditValues(rotationElement, 'Y');
-  rotationJson.S['Z'] := GetElementEditValues(rotationElement, 'Z');
+  ProcessXYZ(offset_element, result_json.O['Offset']);
+  ProcessXYZ(rotation_element, result_json.O['Rotation']);
 end;
 
 
-procedure ProcessSTMPNode(nodeElement: IInterface; nodeJson: TJsonObject);
+procedure ProcessSTMPNode(node_element: IInterface; result_json: TJsonObject);
 var
-  offsetJson: TJsonObject;
-  rotationJson: TJsonObject;
+  node_id: string;
+  node_name: string;
 begin
-  nodeJson.O['Meta'].S['Signature'] := 'STMP.Node';
-  nodeJson.S['Node ID'] := GetElementEditValues(nodeElement, 'Node ID');
-  nodeJson.S['Name'] := GetElementEditValues(nodeElement, 'Node');
+  node_id := GetElementEditValues(node_element, 'Node ID');
+  node_name := GetElementEditValues(node_element, 'Node');
+  result_json.O['Meta'].S['Signature'] := 'STMP.Node';
+  result_json.O['Meta'].S['Name'] := node_id + ':' + node_name;
+  result_json.S['Node ID'] := node_id;
+  result_json.S['Node'] := node_name;
   ProcessOrientation(
-    ElementByPath(nodeElement, 'Orientation\Offset'),
-    ElementByPath(nodeElement, 'Orientation\Rotation'),
-    nodeJson.O['Orientation']);
+    ElementByPath(node_element, 'Orientation\Offset'),
+    ElementByPath(node_element, 'Orientation\Rotation'),
+    result_json.O['Orientation']);
 end;
 
 
-procedure ProcessSTMP(element: IInterface; jsonObj: TJsonObject);
+procedure ProcessSTMP(stmp_record: IInterface; result_json: TJsonObject);
 var
-  eNodes: IInterface;
-  eNode: IInterface;
+  nodes_element: IInterface;
+  node_element: IInterface;
   i: Integer;
 begin
-  ProcessMeta(element, jsonObj);
+  ProcessMeta(stmp_record, result_json);
 
-  eNodes := ElementBySignature(element, 'ENAM');
-  for i := 0 to Pred(ElementCount(eNodes)) do begin
-    eNode := ElementByIndex(eNodes, i);
-    AddMessage('--- node signature: ' + Signature(eNode));
-    ProcessSTMPNode(eNode, jsonObj.A['ENAM'].AddObject);
+  nodes_element := ElementBySignature(stmp_record, 'ENAM');
+  for i := 0 to Pred(ElementCount(nodes_element)) do begin
+    node_element := ElementByIndex(nodes_element, i);
+    AddMessage('--- node signature: ' + Signature(node_element));
+    ProcessSTMPNode(node_element, result_json.A['ENAM'].AddObject);
   end;
 end;
 
 
-procedure ProcessMSTTorSTAT(element: IInterface; jsonObj: TJsonObject);
+procedure ProcessMSTTorSTAT(subrecord: IInterface; result_json: TJsonObject);
 var
-  stmp: IInterface;
-  modl: IInterface;
+  stmp_record: IInterface;
 begin
-  ProcessMeta(element, jsonObj);
+  ProcessMeta(subrecord, result_json);
 
-  jsonObj.S['MODL'] := GetElementEditValues(element, 'Model\MODL');
+  result_json.S['MODL'] := GetElementEditValues(subrecord, 'Model\MODL');
+  ProcessXYZ(ElementByPath(subrecord, 'OBND\Min'), result_json.O['OBND'].O['Min']);
+  ProcessXYZ(ElementByPath(subrecord, 'OBND\Max'), result_json.O['OBND'].O['Max']);
 
-  stmp := LinksTo(ElementBySignature(element, 'SNTP'));
-  if not Assigned(stmp) then Exit;
-  ProcessSTMP(stmp, jsonObj.O['SNTP']);
+  stmp_record := LinksTo(ElementBySignature(subrecord, 'SNTP'));
+  if not Assigned(stmp_record) then Exit;
+  ProcessSTMP(stmp_record, result_json.O['SNTP']);
 end;
 
-procedure ProcessRefrData(ref: IInterface; refJsonObj: TJsonObject);
+procedure ProcessRefrData(refr_record: IInterface; result_json: TJsonObject);
 var
-  dataElement: IInterface;
+  data_element: IInterface;
+  xscal_element: IInterface;
 begin
-  dataElement := ElementBySignature(ref, 'DATA');
-  if not Assigned(dataElement) then Exit;
+  data_element := ElementBySignature(refr_record, 'DATA');
+  if not Assigned(data_element) then Exit;
   ProcessOrientation(
-    ElementByPath(dataElement, 'Position'),
-    ElementByPath(dataElement, 'Rotation'),
-    refJsonObj.O['DATA']
+    ElementByPath(data_element, 'Position'),
+    ElementByPath(data_element, 'Rotation'),
+    result_json.O['DATA']
   );
+  xscal_element := ElementBySignature(refr_record, 'XSCL');
+  if Assigned(xscal_element) then
+    result_json.S['XSCL'] = GetEditValue(refr_record);
 end;
 
 
-procedure ProcessCellRefs(refs: IInterface; parentArray: TJsonArray);
+procedure ProcessCellRefs(cell_group_element: IInterface; result_json: TJsonArray);
 var
   i: integer;
-  ref: IInterface;
-  refNameElement: IInterface;
-  refLinkedElement: IInterface;
-  refJsonObj: TJsonObject;
-  refLinkedJsonObj: TJsonObject;
+  refr_element: IInterface;
+  linked_record: IInterface;
+  item_json: TJsonObject;
 begin
-  for i := 0 to Pred(ElementCount(refs)) do begin
-    ref := ElementByIndex(refs, i);
-    refNameElement := ElementBySignature(ref, 'NAME');
-    refLinkedElement := LinksTo(refNameElement);
-    refJsonObj := parentArray.AddObject;
-    ProcessMeta(ref, refJsonObj);
-    ProcessRefrData(ref, refJsonObj);
-    if Assigned(refLinkedElement) then
+  for i := 0 to Pred(ElementCount(cell_group_element)) do begin
+    refr_element := ElementByIndex(cell_group_element, i);
+    linked_record := LinksTo(ElementBySignature(refr_element, 'NAME'));
+    item_json := result_json.AddObject;
+    ProcessMeta(refr_element, item_json);
+    ProcessRefrData(refr_element, item_json);
+    if Assigned(linked_record) then
     begin
-      if Pos(Signature(refLinkedElement), 'MSTT,STAT') > 0 then
-        ProcessMSTTorSTAT(refLinkedElement, refJsonObj.O['NAME'])
+      if Pos(Signature(linked_record), 'MSTT,STAT') > 0 then
+        ProcessMSTTorSTAT(linked_record, item_json.O['NAME'])
       else
-          ProcessMeta(refLinkedElement, refJsonObj.O['NAME']);
+          ProcessMeta(linked_record, item_json.O['NAME']);
     end;
   end;
 end;
 
 
-procedure ProcessCell(cell: IInterface; jsonObj: TJsonObject);
+procedure ProcessCell(cell_subrecord: IInterface; result_json: TJsonObject);
 var
-  i: integer;
-  refs: IInterface;
-  cellChildGroup: IInterface;
+  cell_child_group_children: IInterface;
+  cell_child_group: IInterface;
 begin
-  ProcessMeta(cell, jsonObj);
+  ProcessMeta(cell_subrecord, result_json);
 
-  cellChildGroup := ChildGroup(cell);
-  refs := FindChildGroup(cellChildGroup, CellTemporaryChildren, cell);
-  ProcessCellRefs(refs, jsonObj.A['Temporary']);
+  cell_child_group := ChildGroup(cell_subrecord);
+  cell_child_group_children := FindChildGroup(
+    cell_child_group, CELL_TEMPORARY_CHILDREN, cell_subrecord);
+  ProcessCellRefs(cell_child_group_children, result_json.A['Temporary']);
 
-  refs := FindChildGroup(cellChildGroup, CellPersistentChildren, cell);
-  ProcessCellRefs(refs, jsonObj.A['Persistent']);
+  cell_child_group_children := FindChildGroup(
+    cell_child_group, CELL_PERSISTENT_CHILDREN, cell_subrecord);
+  ProcessCellRefs(cell_child_group_children, result_json.A['Persistent']);
 end;
 
 
-function SaveAs(aFileName: string): string;
+function SaveAs(file_name: string): string;
 var
-  dlgSave: TSaveDialog;
+  save_dialog: TSaveDialog;
 begin
-  dlgSave := TSaveDialog.Create(nil);
+  save_dialog := TSaveDialog.Create(nil);
   try
-    dlgSave.Options := dlgSave.Options + [ofOverwritePrompt];
-    dlgSave.InitialDir := wbDataPath;
-    dlgSave.FileName := ExtractFileName(aFileName);
-    if dlgSave.Execute then begin
-      Result := dlgSave.FileName;
+    save_dialog.Options := save_dialog.Options + [ofOverwritePrompt];
+    save_dialog.InitialDir := wbDataPath;
+    save_dialog.FileName := ExtractFileName(file_name);
+    if save_dialog.Execute then begin
+      Result := save_dialog.FileName;
     end;
   finally
-    dlgSave.Free;
+    save_dialog.Free;
   end;
 end;
 
@@ -169,45 +172,42 @@ end;
 function Initialize: integer;
 begin
   Result := 0;
-  OutFilePath :=  ExtractFilePath(SaveAs('tmp.json'));
+  global_target_path :=  ExtractFilePath(SaveAs('tmp.json'));
 end;
 
 
 function Process(element: IInterface): integer;
 var
-  jsonObj: TJsonObject;
-  childObj: TJsonObject;
-  i: integer;
-  eNodes: IInterface;
-  eNode: IInterface;
+  result_json: TJsonObject;
 begin
   Result := 0;
-  if Pos(Signature(element), StartSignatures) = 0 then begin
-    AddMessage('Got ' + Signature(element) + ', only works with: ' + StartSignatures);
+  if Pos(Signature(element), START_SIGNATURES) = 0 then begin
+    AddMessage('Got ' + Signature(element) + ', only works with: ' + START_SIGNATURES);
     Result := 1;
     Exit;
   end;
 
-  jsonObj := TJsonObject.Create;
+  result_json := TJsonObject.Create;
 
   if Signature(element) = 'STMP' then
-    ProcessSTMP(element, jsonObj)
+    ProcessSTMP(element, result_json)
   else if Signature(element) = 'MSTT' then
-    ProcessMSTTorSTAT(element, jsonObj)
+    ProcessMSTTorSTAT(element, result_json)
   else if Signature(element) = 'STAT' then
-    ProcessMSTTorSTAT(element, jsonObj)
+    ProcessMSTTorSTAT(element, result_json)
   else if Signature(element) = 'CELL' then
-    ProcessCell(element, jsonObj)
+    ProcessCell(element, result_json)
   else
   begin
+    // selecting a CELL doesn't just call us with the CELL, but also with all children
     AddMessage('skip: ' + FullPath(element));
     Exit;
   end;
 
-  jsonObj.SaveToFile(
-    OutFilePath + '\' + EditorID(element) + '.' + IntToHex64(FixedFormID(element), 8) + '.' + Signature(element) + '.json',
+  result_json.SaveToFile(
+    global_target_path + '\' + EditorID(element) + '.' + IntToHex64(FixedFormID(element), 8) + '.' + Signature(element) + '.json',
     False, TEncoding.UTF8, True);
-  jsonObj.Free;
+  result_json.Free;
 end;
 
 end.

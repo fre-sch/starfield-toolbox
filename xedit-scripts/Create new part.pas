@@ -1,8 +1,5 @@
 {
-	Create new ship part records by copying existing one.
-	Only start at GBFM.
-	TODO: find error when starting at COBJ or FLST.
-	Those are copied as overrides, and it breaks getting a new FormID when making the CELL override a copy.
+	Deep copy chain of ship/outpost part records
   --------------------
 	Hotkey: Ctrl+Shift+E
 }
@@ -15,6 +12,8 @@ Const
   START_SIGNATURES = 'COBJ,FLST,GBFM,CELL,REFR';
   MSTT_STAT_COPY_SKIP_EDID = 'PrefabPackinPivotDummy,OutpostGroupPackinDummy';
   EXCLUDE_FILES_MASTERS = 'Starfield.esm,Starfield.exe,BlueprintShips-Starfield.esm,OldMars.esm,Constellation.esm';
+  DEFAULT_EDID_SUFFIX = '_COPY';
+  DEFAULT_EDID_PREFIX = '';
 
 
 var
@@ -22,6 +21,7 @@ var
   global_search_edid: string;
   global_replace_edid: string;
   global_suffix_edid: string;
+  global_prefix_edid: string;
   global_cobj_copy: boolean;
   global_flst_copy: boolean;
   global_stat_copy: boolean;
@@ -51,10 +51,9 @@ begin
   new_value := StringReplace(
     old_value, global_search_edid, global_replace_edid,
     [rfReplaceAll]);
-  new_value := new_value + global_suffix_edid;
-  if SameText(new_value, old_value) then
-    new_value := old_value + '_COPY';
-  SetEditorID(element, new_value);
+  new_value := global_prefix_edid + new_value + global_suffix_edid;
+  if not SameText(new_value, old_value) then
+    SetEditorID(element, new_value);
 end;
 
 
@@ -74,27 +73,45 @@ begin
 end;
 
 
-function ProcessMSTTorSTAT(mstt_source: IInterface): IInterface;
+function ProcessMSTTorSTAT(subrecord_source: IInterface): IInterface;
 var
-  mstt_copy: IInterface;
+  subrecord_copy: IInterface;
   stmp_source: IInterface;
   stmp_copy: IInterface;
 begin
-  AddMessage('-- MSTT: ' + Name(mstt_source));
-  mstt_copy := wbCopyElementToFile(mstt_source, global_target_file, True, True);
-  UpdateEditorID(mstt_copy);
-  AddMessage('    copy as new: ' + Name(mstt_copy));
+  AddMessage('-- ' + Signature(subrecord_source) + ': ' + Name(subrecord_source));
 
-  stmp_source := LinksTo(ElementBySignature(mstt_source, 'SNTP'));
-
-  if (Assigned(stmp_source) and global_stmp_copy) then
+  if (Signature(subrecord_source) = 'MSTT') and (not global_mstt_copy) then
   begin
-    // using the edid of mstt_source here, otherwise it could turn out as _COPY_COPY
-    stmp_copy := ProcessSTMP(stmp_source, EditorID(mstt_source));
-    SetEditValue(ElementBySignature(mstt_copy, 'SNTP'), Name(stmp_copy));
+    AddMessage('    skipping, global_mstt_copy');
+    Exit;
   end;
 
-  Result := mstt_copy;
+  if (Signature(subrecord_source) = 'STAT') and (not global_stat_copy) then
+  begin
+    AddMessage('    skipping, global_stat_copy');
+    Exit;
+  end;
+
+  if Pos(EditorID(subrecord_source), MSTT_STAT_COPY_SKIP_EDID) > 0 then
+  begin
+    AddMessage('    skipping, MSTT_STAT_COPY_SKIP_EDID');
+    Exit;
+  end;
+
+  subrecord_copy := wbCopyElementToFile(subrecord_source, global_target_file, True, True);
+  UpdateEditorID(subrecord_copy);
+  AddMessage('    copy as new: ' + Name(subrecord_copy));
+
+  stmp_source := LinksTo(ElementBySignature(subrecord_source, 'SNTP'));
+  if (Assigned(stmp_source) and global_stmp_copy) then
+  begin
+    // using the edid of subrecord_source here, otherwise it could turn out as _SUFFIX_SUFFIX
+    stmp_copy := ProcessSTMP(stmp_source, EditorID(subrecord_source));
+    SetEditValue(ElementBySignature(subrecord_copy, 'SNTP'), Name(stmp_copy));
+  end;
+
+  Result := subrecord_copy;
 end;
 
 
@@ -106,20 +123,9 @@ var
 begin
     ref_name_element := ElementBySignature(refr, 'NAME');
     record_source := LinksTo(ref_name_element);
-    if Pos(EditorID(record_source), MSTT_STAT_COPY_SKIP_EDID) > 0 then
-      Exit;
-
-    if (Signature(record_source) = 'MSTT') and global_mstt_copy then
-    begin
-      record_copy := ProcessMSTTorSTAT(record_source);
+    record_copy := ProcessElement(record_source);
+    if Assigned(record_copy) then
       SetEditValue(ref_name_element, Name(record_copy));
-    end
-
-    else if (Signature(record_source) = 'STAT') and global_stat_copy then
-    begin
-      record_copy := ProcessMSTTorSTAT(record_source);
-      SetEditValue(ref_name_element, Name(record_copy));
-    end;
 end;
 
 
@@ -137,8 +143,7 @@ begin
     new_cell_subrecord := Add(new_cell, Signature(old_cell_subrecord), True);
     CloneRecordElements(old_cell_subrecord, new_cell_subrecord);
     SetIsPersistent(new_cell_subrecord, GetIsPersistent(old_cell_subrecord));
-    if Signature(new_cell_subrecord) = 'REFR' then
-      ProcessREFR(new_cell_subrecord);
+    ProcessElement(new_cell_subrecord);
   end;
 end;
 
@@ -177,15 +182,17 @@ end;
 function ProcessPKIN(pkin_source: IInterface): IInterface;
 var
   pkin_copy: IInterface;
-  cell: IInterface;
+  subrecord_source: IInterface;
+  subrecord_copy: IInterface;
 begin
   AddMessage('-- PKIN: ' + Name(pkin_source));
   pkin_copy := wbCopyElementToFile(pkin_source, global_target_file, True, True);
   AddMessage('    copy as new: ' + Name(pkin_copy));
   UpdateEditorID(pkin_copy);
-  cell := LinksTo(ElementByPath(pkin_copy, 'CNAM'));
-  cell := ProcessCELL(cell);
-  SetEditValue(ElementByPath(pkin_copy, 'CNAM'), Name(cell));
+  subrecord_source := LinksTo(ElementByPath(pkin_copy, 'CNAM'));
+  subrecord_copy := ProcessElement(subrecord_source);
+  if Assigned(subrecord_copy) then
+    SetEditValue(ElementByPath(pkin_copy, 'CNAM'), Name(subrecord_copy));
   Result := pkin_copy;
 end;
 
@@ -194,8 +201,8 @@ procedure ProcessGBFMComponentLinkedForms(item: IInterface);
 var
   form_links: IInterface;
   form_link_item: IInterface;
-  pkin_source: IInterface;
-  pkin_copy: IInterface;
+  subrecord_source: IInterface;
+  subrecord_copy: IInterface;
   i: integer;
 begin
   if GetEditValue(ElementBySignature(item, 'BFCB')) <> 'BGSFormLinkData_Component' then Exit;
@@ -204,9 +211,10 @@ begin
   AddMessage('    Form Links Count: ' + IntToStr(ElementCount(form_links)));
   for i := 0 to Pred(ElementCount(form_links)) do begin
     form_link_item := ElementByIndex(form_links, i);
-    pkin_source := LinksTo(ElementBySignature(form_link_item, 'FLFM'));
-    pkin_copy := ProcessPKIN(pkin_source);
-    SetElementEditValues(form_link_item, 'FLFM', Name(pkin_copy));
+    subrecord_source := LinksTo(ElementBySignature(form_link_item, 'FLFM'));
+    subrecord_copy := ProcessElement(subrecord_source);
+    if Assigned(subrecord_copy) then
+      SetElementEditValues(form_link_item, 'FLFM', Name(subrecord_copy));
   end;
 end;
 
@@ -227,6 +235,7 @@ begin
     component := ElementByIndex(component_list, i);
     ProcessGBFMComponentLinkedForms(component);
   end;
+
   Result := gbfm_copy;
 end;
 
@@ -235,7 +244,8 @@ function ProcessFLST(flst_source: IInterface): IInterface;
 var
   flst_new: IInterface;
   form_id_list: IInterface;
-  entity: IInterface;
+  subrecord_source: IInterface;
+  subrecord_copy: IInterface;
   list_element: IInterface;
   i: integer;
 begin
@@ -252,18 +262,21 @@ begin
   form_id_list := ElementByPath(flst_new, 'FormIDs');
   for i := 0 to Pred(ElementCount(form_id_list)) do begin
     list_element := ElementByIndex(form_id_list, i);
-    entity := LinksTo(list_element);
-    SetEditValue(list_element, Name(ProcessGBFM(entity)));
+    subrecord_source := LinksTo(list_element);
+    subrecord_copy := ProcessElement(subrecord_source);
+    if Assigned(subrecord_copy) then
+      SetEditValue(list_element, Name(subrecord_copy));
   end;
+
   Result := flst_new;
 end;
 
 
-procedure ProcessCOBJ(cobj_source: IInterface);
+function ProcessCOBJ(cobj_source: IInterface): IInterface;
 var
   cobj_new: IInterface;
-  cnam_source: IInterface;
-  cnam_copy: IInterface;
+  subrecord_source: IInterface;
+  subrecord_copy: IInterface;
 begin
   AddMessage('-- COBJ:' + Name(cobj_source));
   cobj_new := wbCopyElementToFile(cobj_source, global_target_file, global_cobj_copy, True);
@@ -275,19 +288,57 @@ begin
   else
     AddMessage('    copy as override: ' + Name(cobj_new));
 
-  cnam_source := LinksTo(ElementBySignature(cobj_source, 'CNAM'));
-  if Assigned(cnam_source) then begin
-    if Signature(cnam_source) = 'GBFM' then begin
-        cnam_copy := ProcessGBFM(cnam_source);
-        SetElementEditValues(cobj_new, 'CNAM', Name(cnam_copy));
-      end
-    else begin
-        cnam_copy := ProcessFLST(cnam_source);
-        SetElementEditValues(cobj_new, 'CNAM', Name(cnam_copy));
-    end;
+  subrecord_source := LinksTo(ElementBySignature(cobj_source, 'CNAM'));
+  if Assigned(subrecord_source) then begin
+    subrecord_copy := ProcessElement(subrecord_source);
+    if Assigned(subrecord_copy) then
+      SetElementEditValues(cobj_new, 'CNAM', Name(subrecord_copy));
   end;
+
+  Result := cobj_new;
 end;
 
+
+function ProcessElement(element: IInterface): IInterface;
+var
+  element_signature: string;
+begin
+  element_signature := Signature(element);
+  Result := nil;
+
+  if element_signature = 'COBJ' then
+    Result := ProcessCOBJ(element)
+
+  else if element_signature = 'FLST' then
+    Result := ProcessFLST(element)
+
+  else if element_signature = 'GBFM' then
+    Result := ProcessGBFM(element)
+
+  else if element_signature = 'REFR' then
+    Result := ProcessREFR(element)
+
+  else if element_signature = 'CELL' then
+    Result := ProcessCELL(element)
+
+  else if element_signature = 'STAT' then
+    Result := ProcessMSTTorSTAT(element)
+
+  else if element_signature = 'MSTT' then
+    Result := ProcessMSTTorSTAT(element)
+
+  else if element_signature = 'PKIN' then
+    Result := ProcessPKIN(element)
+
+  else if element_signature = 'STMP' then
+    Result := ProcessSTMP(element)
+  else
+    AddMessage('unhandled signature ' + element_signature + ', element ' + Name(element))
+  ;
+end;
+
+
+// -----------------------------------------------------------------------------
 
 function FileDialog(element: IInterface; var target_file: IInterface): integer;
 var
@@ -379,6 +430,7 @@ var
   input_search: TLabeledEdit;
   input_replace: TLabeledEdit;
   input_suffix: TLabeledEdit;
+  input_prefix: TLabeledEdit;
   button_ok: TButton;
   button_cancel: TButton;
   button_panel: TPanel;
@@ -416,19 +468,19 @@ begin
     stat_copy := TCheckBox.Create(frm);
     stat_copy.Parent := options_panel;
     stat_copy.Caption := 'Copy STATs linked by REFR';
-    stat_copy.Checked := True;
+    stat_copy.Checked := global_stat_copy;
     SetMarginsLayout(stat_copy, 0, 0, 16, 0, alTop);
 
     mstt_copy := TCheckBox.Create(frm);
     mstt_copy.Parent := options_panel;
     mstt_copy.Caption := 'Copy MSTTs linked by REFR';
-    mstt_copy.Checked := True;
+    mstt_copy.Checked := global_mstt_copy;
     SetMarginsLayout(mstt_copy, 0, 0, 16, 0, alTop);
 
     stmp_copy := TCheckBox.Create(frm);
     stmp_copy.Parent := options_panel;
     stmp_copy.Caption := 'Copy STMPs linked by MSTT or STAT';
-    stmp_copy.Checked := True;
+    stmp_copy.Checked := global_stmp_copy;
     SetMarginsLayout(stmp_copy, 0, 0, 16, 0, alTop);
 
     update_edit_panel := TPanel.Create(frm);
@@ -447,10 +499,18 @@ begin
     input_replace.LabelPosition := lpLeft;
     SetMarginsLayout(input_replace, 2, 2, 120, 0, alTop);
 
+    input_prefix := TLabeledEdit.Create(frm);
+    input_prefix.Parent := update_edit_panel;
+    input_prefix.EditLabel.Caption := 'Add Prefix';
+    input_prefix.LabelPosition := lpLeft;
+    input_prefix.Text := global_prefix_edid;
+    SetMarginsLayout(input_prefix, 2, 2, 120, 0, alTop);
+
     input_suffix := TLabeledEdit.Create(frm);
     input_suffix.Parent := update_edit_panel;
     input_suffix.EditLabel.Caption := 'Add Suffix';
     input_suffix.LabelPosition := lpLeft;
+    input_suffix.Text := global_suffix_edid;
     SetMarginsLayout(input_suffix, 2, 2, 120, 0, alTop);
 
     button_panel := TPanel.Create(frm);
@@ -477,6 +537,7 @@ begin
     global_search_edid := input_search.Text;
     global_replace_edid := input_replace.Text;
     global_suffix_edid := input_suffix.Text;
+    global_prefix_edid := input_prefix.Text;
     global_cobj_copy := cobj_copy.Checked;
     global_flst_copy := flst_copy.Checked;
     global_stat_copy := stat_copy.Checked;
@@ -497,6 +558,8 @@ begin
   global_mstt_copy := True;
   global_stat_copy := True;
   global_stmp_copy := True;
+  global_prefix_edid := DEFAULT_EDID_PREFIX;
+  global_suffix_edid := DEFAULT_EDID_SUFFIX;
 end;
 
 
@@ -515,15 +578,8 @@ begin
   Result := OptionsDialog('Script Options');
   if Result <> mrOk then Exit;
 
-  if Signature(element) = 'COBJ' then
-    ProcessCOBJ(element)
-  else if Signature(element) = 'FLST' then
-    ProcessFLST(element)
-  else if Signature(element) = 'GBFM' then
-    ProcessGBFM(element)
-  else if Signature(element) = 'REFR' then
-    ProcessCELL(element)
-  ;
+  ProcessElement(element);
+
   Result := 0;
 end;
 
