@@ -25,8 +25,10 @@ var
   global_cobj_copy: boolean;
   global_flst_copy: boolean;
   global_stat_copy: boolean;
+  global_pkin_copy: boolean;
   global_mstt_copy: boolean;
   global_stmp_copy: boolean;
+  global_all_the_same: boolean;
 
 
 procedure CloneRecordElements(old_record, new_record: IInterface);
@@ -186,6 +188,10 @@ var
   subrecord_copy: IInterface;
 begin
   AddMessage('-- PKIN: ' + Name(pkin_source));
+  if not global_pkin_copy then begin
+    AddMessage('    skipping, global_pkin_copy');
+    Exit;
+  end;
   pkin_copy := wbCopyElementToFile(pkin_source, global_target_file, True, True);
   AddMessage('    copy as new: ' + Name(pkin_copy));
   UpdateEditorID(pkin_copy);
@@ -243,6 +249,7 @@ end;
 function ProcessWEAP(weap_source: IInterface): IInterface;
 var
   weap_copy: IInterface;
+
 begin
   AddMessage('-- WEAP: ' + Name(weap_source));
   weap_copy := wbCopyElementToFile(weap_source, global_target_file, True, True);
@@ -347,7 +354,6 @@ begin
 
   else if element_signature = 'WEAP' then
     Result := ProcessWEAP(element)
-
   else
     AddMessage('unhandled signature ' + element_signature + ', element ' + Name(element))
   ;
@@ -453,8 +459,10 @@ var
   cobj_copy: TCheckBox;
   flst_copy: TCheckBox;
   stat_copy: TCheckBox;
+  pkin_copy: TCheckBox;
   mstt_copy: TCheckBox;
   stmp_copy: TCheckBox;
+  all_the_same: TCheckBox;
 begin
   try
     frm := TForm.Create(nil);
@@ -487,6 +495,12 @@ begin
     stat_copy.Checked := global_stat_copy;
     SetMarginsLayout(stat_copy, 0, 0, 16, 0, alTop);
 
+    pkin_copy := TCheckBox.Create(frm);
+    pkin_copy.Parent := options_panel;
+    pkin_copy.Caption := 'Copy PKINs linked by GBFM';
+    pkin_copy.Checked := global_pkin_copy;
+    SetMarginsLayout(pkin_copy, 0, 0, 16, 0, alTop);
+
     mstt_copy := TCheckBox.Create(frm);
     mstt_copy.Parent := options_panel;
     mstt_copy.Caption := 'Copy MSTTs linked by REFR';
@@ -498,6 +512,12 @@ begin
     stmp_copy.Caption := 'Copy STMPs linked by MSTT or STAT';
     stmp_copy.Checked := global_stmp_copy;
     SetMarginsLayout(stmp_copy, 0, 0, 16, 0, alTop);
+
+    all_the_same := TCheckBox.Create(frm);
+    all_the_same.Parent := options_panel;
+    all_the_same.Caption := 'Use same options for all selected Objects';
+    all_the_same.Checked := global_all_the_same;
+    SetMarginsLayout(all_the_same, 0, 0, 16, 0, alTop);
 
     update_edit_panel := TPanel.Create(frm);
     update_edit_panel.Parent := frm;
@@ -557,8 +577,10 @@ begin
     global_cobj_copy := cobj_copy.Checked;
     global_flst_copy := flst_copy.Checked;
     global_stat_copy := stat_copy.Checked;
+    global_pkin_copy := pkin_copy.Checked;
     global_mstt_copy := mstt_copy.Checked;
     global_stmp_copy := stmp_copy.Checked;
+    global_all_the_same := all_the_same.Checked;
   finally
     frm.Free;
   end;
@@ -573,7 +595,9 @@ begin
   global_flst_copy := False;
   global_mstt_copy := True;
   global_stat_copy := True;
+  global_pkin_copy := True;
   global_stmp_copy := True;
+  global_all_the_same := false;
   global_prefix_edid := DEFAULT_EDID_PREFIX;
   global_suffix_edid := DEFAULT_EDID_SUFFIX;
 end;
@@ -587,13 +611,13 @@ begin
     Result := 1;
     Exit;
   end;
+  if not global_all_the_same then begin
+	Result := FileDialog(element, global_target_file);
+	if Result <> 0 then Exit;
 
-  Result := FileDialog(element, global_target_file);
-  if Result <> 0 then Exit;
-
-  Result := OptionsDialog('Script Options');
-  if Result <> mrOk then Exit;
-
+	Result := OptionsDialog('Script Options');
+	if Result <> mrOk then Exit;
+  end
   ProcessElement(element);
 
   Result := 0;
