@@ -10,10 +10,11 @@ Const
   CELL_PERSISTENT_CHILDREN = 8;
   CELL_TEMPORARY_CHILDREN = 9;
   START_SIGNATURES = 'COBJ,FLST,GBFM,CELL,REFR';
-  MSTT_STAT_COPY_SKIP_EDID = 'PrefabPackinPivotDummy,OutpostGroupPackinDummy';
+  DEFAULT_SKIP_EDIDS = 'PrefabPackinPivotDummy,OutpostGroupPackinDummy,LP_,PostEffectVolume';
   EXCLUDE_FILES_MASTERS = 'Starfield.esm,Starfield.exe,BlueprintShips-Starfield.esm,OldMars.esm,Constellation.esm';
   DEFAULT_EDID_SUFFIX = '_COPY';
   DEFAULT_EDID_PREFIX = '';
+  DEFAULT_STMP_PREFIX = 'ShipSnap_';
 
 
 var
@@ -29,6 +30,27 @@ var
   global_mstt_copy: boolean;
   global_stmp_copy: boolean;
   global_all_the_same: boolean;
+  global_skip_edids: string;
+
+
+function IsPrefixed(prefixes: string; str: string): bool;
+var
+  i: integer;
+  sl: TStringList;
+begin
+  Result := False;
+  sl := TStringList.Create;
+  sl.CommaText := prefixes;
+  for i := 0 to pred(sl.Count) do
+  begin
+    if Pos(sl.Strings[i], str) = 1 then
+    begin
+      Result := True;
+      break;
+    end;
+  end;
+  sl.Free;
+end;
 
 
 procedure CloneRecordElements(old_record, new_record: IInterface);
@@ -68,7 +90,7 @@ begin
   // set it first, so it contains the orientation phrase which is then
   // replaced in UpdateEditorID
   // TODO: this prefix is only useful for ship part data, should be variable
-  SetEditorID(stmp_copy, 'ShipSnap_' + mstt_edid);
+  SetEditorID(stmp_copy, DEFAULT_STMP_PREFIX + mstt_edid);
   UpdateEditorID(stmp_copy);
   AddMessage('    copy as new: ' + Name(stmp_copy));
   Result := stmp_copy;
@@ -92,12 +114,6 @@ begin
   if (Signature(subrecord_source) = 'STAT') and (not global_stat_copy) then
   begin
     AddMessage('    skipping, global_stat_copy');
-    Exit;
-  end;
-
-  if Pos(EditorID(subrecord_source), MSTT_STAT_COPY_SKIP_EDID) > 0 then
-  begin
-    AddMessage('    skipping, MSTT_STAT_COPY_SKIP_EDID');
     Exit;
   end;
 
@@ -321,9 +337,17 @@ end;
 function ProcessElement(element: IInterface): IInterface;
 var
   element_signature: string;
+  element_edid: string;
 begin
   element_signature := Signature(element);
+  element_edid := EditorID(element);
   Result := nil;
+
+  if IsPrefixed(global_skip_edids, element_edid) then
+  begin
+    AddMessage('    skipping editor id: ' + global_skip_edids);
+    Exit;
+  end;
 
   if element_signature = 'COBJ' then
     Result := ProcessCOBJ(element)
@@ -453,6 +477,7 @@ var
   input_replace: TLabeledEdit;
   input_suffix: TLabeledEdit;
   input_prefix: TLabeledEdit;
+  input_skip_edids: TLabeledEdit;
   button_ok: TButton;
   button_cancel: TButton;
   button_panel: TPanel;
@@ -517,7 +542,16 @@ begin
     all_the_same.Parent := options_panel;
     all_the_same.Caption := 'Use same options for all selected Objects';
     all_the_same.Checked := global_all_the_same;
-    SetMarginsLayout(all_the_same, 0, 0, 16, 0, alTop);
+    SetMarginsLayout(all_the_same, 0, 4, 16, 0, alTop);
+
+    input_skip_edids := TLabeledEdit.Create(frm);
+    input_skip_edids.Parent := options_panel;
+    input_skip_edids.EditLabel.Caption := 'Skip EDIDs (prefix)';
+    input_skip_edids.Text := global_skip_edids;
+    input_skip_edids.LabelPosition := lpLeft;
+    SetMarginsLayout(input_skip_edids, 0, 0, 120, 0, alTop);
+
+    // UPDATE EDID PANEL
 
     update_edit_panel := TPanel.Create(frm);
     update_edit_panel.Parent := frm;
@@ -581,6 +615,8 @@ begin
     global_mstt_copy := mstt_copy.Checked;
     global_stmp_copy := stmp_copy.Checked;
     global_all_the_same := all_the_same.Checked;
+    global_skip_edids := input_skip_edids.Text;
+
   finally
     frm.Free;
   end;
@@ -600,24 +636,31 @@ begin
   global_all_the_same := false;
   global_prefix_edid := DEFAULT_EDID_PREFIX;
   global_suffix_edid := DEFAULT_EDID_SUFFIX;
+  global_skip_edids := DEFAULT_SKIP_EDIDS;
 end;
 
 
 function Process(element: IInterface): integer;
 begin
   Result := 0;
-  if Pos(Signature(element), START_SIGNATURES) = 0 then begin
+  if Pos(Signature(element), START_SIGNATURES) = 0 then
+  begin
     AddMessage('Got ' + Signature(element) + ', only works with: ' + START_SIGNATURES);
     Result := 1;
     Exit;
   end;
-  if not global_all_the_same then begin
-	Result := FileDialog(element, global_target_file);
-	if Result <> 0 then Exit;
 
-	Result := OptionsDialog('Script Options');
-	if Result <> mrOk then Exit;
+  if not global_all_the_same then
+  begin
+    Result := FileDialog(element, global_target_file);
+    if Result <> 0 then
+      Exit;
+
+    Result := OptionsDialog('Script Options');
+    if Result <> mrOk then
+      Exit;
   end
+
   ProcessElement(element);
 
   Result := 0;
