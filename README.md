@@ -63,4 +63,4 @@ In Blender add starfield_json_io.py as addon.
 
 # Credits
 
-xedit team, everyone at xedit discord, and specifically rux616
+xedit team, everyone at xedit discord, and specifically rux616, remosito, LuxZg

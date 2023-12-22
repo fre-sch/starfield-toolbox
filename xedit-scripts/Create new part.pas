@@ -27,6 +27,7 @@ var
   global_flst_copy: boolean;
   global_stat_copy: boolean;
   global_pkin_copy: boolean;
+  global_cell_copy: boolean;
   global_mstt_copy: boolean;
   global_stmp_copy: boolean;
   global_all_the_same: boolean;
@@ -185,6 +186,11 @@ var
   group_cell, new_cell: IInterface;
 begin
   AddMessage('-- CELL: ' + Name(old_cell));
+  if not global_cell_copy then
+  begin
+    AddMessage('    skipping, global_cell_copy');
+    Exit;
+  end;
   if not HasGroup(global_target_file, 'CELL') then
     Add(global_target_file, 'CELL', True);
   group_cell := GroupBySignature(global_target_file, 'CELL');
@@ -485,6 +491,7 @@ var
   flst_copy: TCheckBox;
   stat_copy: TCheckBox;
   pkin_copy: TCheckBox;
+  cell_copy: TCheckBox;
   mstt_copy: TCheckBox;
   stmp_copy: TCheckBox;
   all_the_same: TCheckBox;
@@ -525,6 +532,12 @@ begin
     pkin_copy.Caption := 'Copy PKINs linked by GBFM';
     pkin_copy.Checked := global_pkin_copy;
     SetMarginsLayout(pkin_copy, 0, 0, 16, 0, alTop);
+
+    cell_copy := TCheckBox.Create(frm);
+    cell_copy.Parent := options_panel;
+    cell_copy.Caption := 'Copy CELLs linked by PKIN';
+    cell_copy.Checked := global_cell_copy;
+    SetMarginsLayout(cell_copy, 0, 0, 16, 0, alTop);
 
     mstt_copy := TCheckBox.Create(frm);
     mstt_copy.Parent := options_panel;
@@ -612,6 +625,7 @@ begin
     global_flst_copy := flst_copy.Checked;
     global_stat_copy := stat_copy.Checked;
     global_pkin_copy := pkin_copy.Checked;
+    global_cell_copy := cell_copy.Checked;
     global_mstt_copy := mstt_copy.Checked;
     global_stmp_copy := stmp_copy.Checked;
     global_all_the_same := all_the_same.Checked;
@@ -632,6 +646,7 @@ begin
   global_mstt_copy := True;
   global_stat_copy := True;
   global_pkin_copy := True;
+  global_cell_copy := True;
   global_stmp_copy := True;
   global_all_the_same := false;
   global_prefix_edid := DEFAULT_EDID_PREFIX;
